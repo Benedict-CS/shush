@@ -34,7 +34,6 @@
     transition: background 0.1s;
   }
   body.warning { background: #3d0f12; }
-  body.warning-quiet { background: #1a2e3d; }
   .container { width: 100%; max-width: 640px; }
   h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
   .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
@@ -69,11 +68,6 @@
     position: absolute; top: 0; bottom: 0; width: 2px;
     background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.6);
     pointer-events: none;
-  }
-  .meter-threshold-quiet {
-    position: absolute; top: 0; bottom: 0; width: 2px;
-    background: var(--blue); box-shadow: 0 0 4px var(--blue);
-    pointer-events: none; opacity: 0.7;
   }
   .level-display { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 12px; }
   .level-current { font-size: 36px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -168,7 +162,6 @@
     animation: pulse 0.6s ease-in-out infinite;
   }
   .warning-banner.show { display: block; }
-  .warning-banner.quiet { background: var(--blue); }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
   .error {
     background: #3d0f12; border: 1px solid var(--red); color: var(--red);
@@ -279,7 +272,6 @@
       </div>
       <div class="meter-wrap">
         <div class="meter-fill" id="meterFill"></div>
-        <div class="meter-threshold-quiet" id="meterThresholdQuiet" style="left: 30%; display:none;"></div>
         <div class="meter-threshold" id="meterThreshold" style="left: 70%"></div>
       </div>
       <div class="controls">
@@ -296,6 +288,17 @@
           <option value="192">192 kbps</option>
         </select>
         <span class="hint" id="recordStatus" style="flex:1;align-self:center;">未錄音</span>
+      </div>
+      <div id="recordPreviewBox" style="display:none; margin-top:10px; padding:10px; background:#0d1117; border:1px solid var(--border); border-radius:8px;">
+        <div class="hint" style="margin-bottom:6px;">🎧 預覽 webm（瀏覽器原生，最穩）</div>
+        <audio id="recordPreviewRaw" controls style="width:100%; margin-bottom:8px;"></audio>
+        <div class="hint" style="margin-bottom:6px;">🎧 預覽 MP3（轉檔後）</div>
+        <audio id="recordPreviewAudio" controls style="width:100%; margin-bottom:8px;"></audio>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a id="downloadRaw" class="tiny" style="text-decoration:none; padding:6px 10px; border:1px solid var(--blue); border-radius:6px; color:var(--blue);" download="recording.webm">⬇ 下載 webm（推薦）</a>
+          <a id="downloadMp3" class="tiny" style="text-decoration:none; padding:6px 10px; border:1px solid var(--border); border-radius:6px; color:var(--text);" download="recording.mp3">⬇ 下載 MP3</a>
+        </div>
+        <div class="hint" id="recordDiag" style="margin-top:6px; font-size:10px;"></div>
       </div>
       <div class="hint">熱鍵：<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> 暫停 · <kbd>Ctrl</kbd>+<kbd>R</kbd> 開始錄音 · <kbd>Ctrl</kbd>+<kbd>K</kbd> 停止錄音</div>
     </div>
@@ -343,26 +346,6 @@
               <input type="range" id="cooldown" min="500" max="10000" value="2000" step="500">
               <span class="value" id="cooldownVal">2.0 s</span>
             </div>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <div class="settings-section-title" data-section>太小聲警告（開會用）</div>
-          <div class="settings-section-body">
-            <div class="setting-row">
-              <label class="check"><input type="checkbox" id="quietEnabled"> 講話太小聲時提醒</label>
-            </div>
-            <div class="setting-row">
-              <label for="quietThreshold">小聲閾值</label>
-              <input type="range" id="quietThreshold" min="-60" max="-10" value="-40" step="1">
-              <span class="value" id="quietThresholdVal">-40 dB</span>
-            </div>
-            <div class="setting-row">
-              <label for="quietHoldMs">觸發時間</label>
-              <input type="range" id="quietHoldMs" min="500" max="5000" value="2000" step="100">
-              <span class="value" id="quietHoldMsVal">2.0 s</span>
-            </div>
-            <div class="hint">會在偵測到聲音（&gt; -55 dB）但低於閾值時提醒，靜音時不會誤報</div>
           </div>
         </div>
 
@@ -500,15 +483,11 @@
   const STREAK_KEY = 'voiceMonitorStreak';
   const DB_NAME = 'voiceMonitor';
   const DB_VERSION = 1;
-  const QUIET_NOISE_FLOOR = -55;
-
   // ===== Element refs =====
   const els = {};
   [
     'startBtn','pauseBtn','calibrateBtn','deviceSelect',
     'threshold','thresholdVal','holdMs','holdMsVal','cooldown','cooldownVal',
-    'quietEnabled','quietThreshold','quietThresholdVal','quietHoldMs','quietHoldMsVal',
-    'meterThresholdQuiet',
     'escalateEnabled','escalateWindow','escalateWindowVal','levelBadges',
     'beepEnabled','soundSelect','previewSound','customFile','customFileRow',
     'soundVolume','soundVolumeVal',
@@ -521,7 +500,8 @@
     'timeline','histogram',
     'todayCount','yesterdayCount','weekCount',
     'refreshHistory','exportCsv','clearLog','installBtn',
-    'recordBtn','recordStatus','recordBitrate'
+    'recordBtn','recordStatus','recordBitrate',
+    'recordPreviewBox','recordPreviewAudio','recordPreviewRaw','downloadMp3','downloadRaw','recordDiag'
   ].forEach(id => els[id] = document.getElementById(id));
 
   const favicon = document.getElementById('favicon');
@@ -532,7 +512,6 @@
   let running = false, paused = false, loopTimerId = null, drawRafId = null;
   let keepAliveGain = null;
   let overSince = null, lastWarnAt = 0;
-  let quietSince = null, lastQuietAt = 0;
   let warningCount = 0, peakDb = -Infinity, avgSum = 0, avgN = 0;
   let recentWarningTs = [];
   let timelineBuf = [];
@@ -558,16 +537,8 @@
   setRangeLabel(els.threshold, () => { els.thresholdVal.textContent = `${els.threshold.value} dB`; els.meterThreshold.style.left = `${dbToPct(parseInt(els.threshold.value,10))}%`; });
   setRangeLabel(els.holdMs, () => { els.holdMsVal.textContent = `${els.holdMs.value} ms`; });
   setRangeLabel(els.cooldown, () => { els.cooldownVal.textContent = `${(parseInt(els.cooldown.value,10)/1000).toFixed(1)} s`; });
-  setRangeLabel(els.quietThreshold, () => { els.quietThresholdVal.textContent = `${els.quietThreshold.value} dB`; els.meterThresholdQuiet.style.left = `${dbToPct(parseInt(els.quietThreshold.value,10))}%`; });
-  setRangeLabel(els.quietHoldMs, () => { els.quietHoldMsVal.textContent = `${(parseInt(els.quietHoldMs.value,10)/1000).toFixed(1)} s`; });
   setRangeLabel(els.escalateWindow, () => { els.escalateWindowVal.textContent = `${(parseInt(els.escalateWindow.value,10)/60).toFixed(1)} min`; });
   setRangeLabel(els.soundVolume, () => { els.soundVolumeVal.textContent = `${els.soundVolume.value}%`; });
-
-  function updateQuietThresholdVisibility() {
-    els.meterThresholdQuiet.style.display = els.quietEnabled.checked ? 'block' : 'none';
-  }
-  els.quietEnabled.addEventListener('change', updateQuietThresholdVisibility);
-  updateQuietThresholdVisibility();
 
   // Collapsible sections
   document.querySelectorAll('[data-section]').forEach(t => {
@@ -579,7 +550,6 @@
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         threshold: els.threshold.value, holdMs: els.holdMs.value, cooldown: els.cooldown.value,
-        quietEnabled: els.quietEnabled.checked, quietThreshold: els.quietThreshold.value, quietHoldMs: els.quietHoldMs.value,
         escalateEnabled: els.escalateEnabled.checked, escalateWindow: els.escalateWindow.value,
         beepEnabled: els.beepEnabled.checked,
         soundSelect: els.soundSelect.value === 'custom' ? 'beep' : els.soundSelect.value,
@@ -596,16 +566,15 @@
     try {
       const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
       const set = (key, prop) => { if (p[key] != null) els[key][prop] = p[key]; };
-      ['threshold','holdMs','cooldown','quietThreshold','quietHoldMs',
+      ['threshold','holdMs','cooldown',
        'escalateWindow','soundSelect','soundVolume','scheduleStart','scheduleEnd','dailyGoal']
         .forEach(k => set(k, 'value'));
-      ['quietEnabled','escalateEnabled','beepEnabled','notifyEnabled',
+      ['escalateEnabled','beepEnabled','notifyEnabled',
        'titleEnabled','scheduleEnabled','weekdaysOnly']
         .forEach(k => { if (typeof p[k] === 'boolean') els[k].checked = p[k]; });
       // refresh labels
-      [els.threshold,els.holdMs,els.cooldown,els.quietThreshold,
-       els.quietHoldMs,els.escalateWindow,els.soundVolume].forEach(el => el.dispatchEvent(new Event('input')));
-      updateQuietThresholdVisibility();
+      [els.threshold,els.holdMs,els.cooldown,
+       els.escalateWindow,els.soundVolume].forEach(el => el.dispatchEvent(new Event('input')));
     } catch {}
   }
   loadPrefs();
@@ -803,7 +772,6 @@
     recentWarningTs.push(performance.now());
     const level = currentEscalationLevel();
     updateLevelBadges(level);
-    els.warning.classList.remove('quiet');
     els.warning.textContent = '⚠️ 太大聲了！小聲一點';
     els.warning.classList.add('show');
     document.body.classList.add('warning');
@@ -827,21 +795,6 @@
     logEvent({ ts: Date.now(), db: currentDb, level, type: 'loud' });
     scheduleHistoryRefresh();
     scheduleStreakRefresh();
-  }
-
-  function triggerQuietWarning(currentDb) {
-    els.warning.classList.add('quiet');
-    els.warning.textContent = '🔉 太小聲了！說大聲一點';
-    els.warning.classList.add('show');
-    document.body.classList.add('warning-quiet');
-    if (els.beepEnabled.checked) playSynthBeep(440, 250);
-    fireSystemNotification('🔉 太小聲', `當前 ${currentDb.toFixed(1)} dB`);
-    setTimeout(() => {
-      els.warning.classList.remove('show');
-      els.warning.classList.remove('quiet');
-      document.body.classList.remove('warning-quiet');
-    }, 1200);
-    logEvent({ ts: Date.now(), db: currentDb, level: 1, type: 'quiet' });
   }
 
   // ===== Title / favicon =====
@@ -881,7 +834,6 @@
     timelineWarnings = timelineWarnings.filter(p => now - p.ts < windowMs);
 
     const threshold = parseInt(els.threshold.value, 10);
-    const quietT = parseInt(els.quietThreshold.value, 10);
     const dbToY = db => {
       const c = Math.max(MIN_DB, Math.min(0, db));
       return h - ((c - MIN_DB) / (0 - MIN_DB)) * h;
@@ -897,10 +849,6 @@
     // threshold lines
     tCtx.strokeStyle = 'rgba(255,255,255,0.4)'; tCtx.setLineDash([4,4]); tCtx.lineWidth = 1;
     tCtx.beginPath(); tCtx.moveTo(0, dbToY(threshold)); tCtx.lineTo(w, dbToY(threshold)); tCtx.stroke();
-    if (els.quietEnabled.checked) {
-      tCtx.strokeStyle = 'rgba(88,166,255,0.5)';
-      tCtx.beginPath(); tCtx.moveTo(0, dbToY(quietT)); tCtx.lineTo(w, dbToY(quietT)); tCtx.stroke();
-    }
     tCtx.setLineDash([]);
     // samples as line + fill
     if (timelineBuf.length > 1) {
@@ -943,7 +891,6 @@
     try { events = await queryEvents(start, end); } catch {}
     const buckets = new Array(24).fill(0);
     for (const e of events) {
-      if (e.type === 'quiet') continue;
       const hr = new Date(e.ts).getHours();
       buckets[hr]++;
     }
@@ -978,9 +925,9 @@
         queryEvents(ydayStart, start),
         queryEvents(weekStart, start + 24*3600*1000),
       ]);
-      els.todayCount.textContent = today.filter(e => e.type !== 'quiet').length;
-      els.yesterdayCount.textContent = yday.filter(e => e.type !== 'quiet').length;
-      els.weekCount.textContent = week.filter(e => e.type !== 'quiet').length;
+      els.todayCount.textContent = today.length;
+      els.yesterdayCount.textContent = yday.length;
+      els.weekCount.textContent = week.length;
     } catch (e) { console.warn(e); }
     drawHistogram();
   }
@@ -1010,7 +957,7 @@
       const dayEnd = dayStart + 24*3600*1000;
       let events = [];
       try { events = await queryEvents(dayStart, dayEnd); } catch {}
-      const count = events.filter(e => e.type !== 'quiet').length;
+      const count = events.length;
       if (count < goal) streak += 1; else streak = 0;
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -1044,46 +991,24 @@
     timelineBuf.push({ ts: performance.now(), db: dbShown });
 
     const threshold = parseInt(els.threshold.value, 10);
-    const quietT = parseInt(els.quietThreshold.value, 10);
     const holdMs = parseInt(els.holdMs.value, 10);
     const cooldownMs = parseInt(els.cooldown.value, 10);
-    const quietHoldMs = parseInt(els.quietHoldMs.value, 10);
     const now = performance.now();
 
-    // Loud
     if (dbShown > threshold) {
-      els.levelCurrent.classList.add('over'); els.levelCurrent.classList.remove('under');
+      els.levelCurrent.classList.add('over');
       if (overSince === null) overSince = now;
       if (now - overSince >= holdMs && now - lastWarnAt >= cooldownMs) {
         triggerWarning(dbShown);
         lastWarnAt = now; overSince = null;
       }
       els.status.textContent = '⚠️ 過大';
-      els.status.classList.add('over'); els.status.classList.remove('recording','under','paused');
+      els.status.classList.add('over'); els.status.classList.remove('recording','paused');
     } else {
       els.levelCurrent.classList.remove('over');
       overSince = null;
-      els.status.classList.remove('over');
-    }
-
-    // Quiet (only when there's some sound, to avoid firing on pure silence)
-    if (els.quietEnabled.checked && dbShown > QUIET_NOISE_FLOOR && dbShown < quietT) {
-      els.levelCurrent.classList.add('under');
-      if (quietSince === null) quietSince = now;
-      if (now - quietSince >= quietHoldMs && now - lastQuietAt >= 5000) {
-        triggerQuietWarning(dbShown);
-        lastQuietAt = now; quietSince = null;
-      }
-      els.status.textContent = '🔉 過小';
-      els.status.classList.add('under'); els.status.classList.remove('recording','over','paused');
-    } else {
-      els.levelCurrent.classList.remove('under');
-      quietSince = null;
-    }
-
-    if (!els.levelCurrent.classList.contains('over') && !els.levelCurrent.classList.contains('under')) {
       els.status.textContent = '監測中';
-      els.status.classList.add('recording'); els.status.classList.remove('over','under','paused');
+      els.status.classList.add('recording'); els.status.classList.remove('over','paused');
     }
 
     // refresh escalation badges (decay)
@@ -1120,8 +1045,8 @@
       sourceNode.connect(keepAliveGain).connect(audioCtx.destination);
 
       running = true; paused = false;
-      overSince = null; quietSince = null;
-      lastWarnAt = 0; lastQuietAt = 0;
+      overSince = null;
+      lastWarnAt = 0;
       warningCount = 0; peakDb = -Infinity; avgSum = 0; avgN = 0;
       recentWarningTs = []; timelineBuf = []; timelineWarnings = [];
       els.statWarnings.textContent = '0'; els.statPeak.textContent = '—'; els.statAvg.textContent = '—';
@@ -1164,9 +1089,9 @@
     els.pauseBtn.disabled = true; els.pauseBtn.textContent = '⏸ 暫停';
     els.calibrateBtn.disabled = true;
     els.recordBtn.disabled = true;
-    els.status.textContent = '已停止'; els.status.classList.remove('recording','over','under','paused');
+    els.status.textContent = '已停止'; els.status.classList.remove('recording','over','paused');
     els.levelCurrent.textContent = '—';
-    els.levelCurrent.classList.remove('over','under');
+    els.levelCurrent.classList.remove('over');
     els.meterFill.style.width = '0%';
     resetTitleAndFavicon();
   }
@@ -1315,33 +1240,77 @@
 
   async function encodeBlobToMp3(blob, kbps) {
     const arrayBuf = await blob.arrayBuffer();
+    if (arrayBuf.byteLength === 0) throw new Error('輸入 blob 0 byte');
     const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
     let audioBuf;
     try { audioBuf = await tempCtx.decodeAudioData(arrayBuf); }
     finally { try { tempCtx.close(); } catch {} }
     const length = audioBuf.length;
-    const sr = audioBuf.sampleRate;
     const channels = audioBuf.numberOfChannels;
+    if (length === 0) throw new Error('decode 結果 0 樣本');
+
     // Downmix to mono
-    const mono = new Float32Array(length);
+    let mono = new Float32Array(length);
     if (channels === 1) {
       mono.set(audioBuf.getChannelData(0));
     } else {
       const l = audioBuf.getChannelData(0), r = audioBuf.getChannelData(1);
       for (let i = 0; i < length; i++) mono[i] = (l[i] + r[i]) * 0.5;
     }
+
+    // Find peak amplitude (for diagnostics + normalization)
+    let peak = 0;
+    for (let i = 0; i < length; i++) {
+      const a = Math.abs(mono[i]);
+      if (a > peak) peak = a;
+    }
+    if (peak === 0) throw new Error('全部樣本為 0（mic 沒收到聲音）');
+
+    // Normalize so peak hits ~0.95 (about -0.4 dBFS) — guarantees audible output
+    // regardless of how quiet the original recording was.
+    const targetPeak = 0.95;
+    const gain = peak < targetPeak ? targetPeak / peak : 1;
+    if (gain !== 1) {
+      for (let i = 0; i < length; i++) mono[i] *= gain;
+    }
+
+    // Resample to 44100 if needed — lamejs supports many rates but 44100 is
+    // the universally-supported MP3 sample rate.
+    let sr = audioBuf.sampleRate;
+    const targetSr = 44100;
+    if (sr !== targetSr) {
+      const ratio = targetSr / sr;
+      const outLen = Math.floor(length * ratio);
+      const resampled = new Float32Array(outLen);
+      for (let i = 0; i < outLen; i++) {
+        const srcIdx = i / ratio;
+        const i0 = Math.floor(srcIdx);
+        const i1 = Math.min(i0 + 1, length - 1);
+        const frac = srcIdx - i0;
+        resampled[i] = mono[i0] * (1 - frac) + mono[i1] * frac;
+      }
+      mono = resampled;
+      sr = targetSr;
+    }
+
     const encoder = new lamejs.Mp3Encoder(1, sr, kbps);
     const block = 1152;
     const out = [];
-    for (let i = 0; i < length; i += block) {
-      const chunk = mono.subarray(i, Math.min(i + block, length));
-      const ints = floatToInt16(chunk);
+    for (let i = 0; i < mono.length; i += block) {
+      const end = Math.min(i + block, mono.length);
+      // Copy to a fresh buffer (avoid passing subarray view to lamejs)
+      const slice = new Float32Array(end - i);
+      slice.set(mono.subarray(i, end));
+      const ints = floatToInt16(slice);
       const enc = encoder.encodeBuffer(ints);
       if (enc.length > 0) out.push(enc);
     }
     const tail = encoder.flush();
     if (tail.length > 0) out.push(tail);
-    return new Blob(out, { type: 'audio/mpeg' });
+    const mp3Blob = new Blob(out, { type: 'audio/mpeg' });
+    mp3Blob._diagPeak = peak;
+    mp3Blob._diagGain = gain;
+    return mp3Blob;
   }
 
   function startRecording() {
@@ -1356,37 +1325,50 @@
       const opts = recordMime ? { mimeType: recordMime } : {};
       mediaRecorder = new MediaRecorder(mediaStream, opts);
       recordChunks = [];
+      // Clear any previous preview
+      els.recordPreviewBox.style.display = 'none';
+      els.downloadMp3.style.display = 'inline-block';
+      els.recordPreviewAudio.src = '';
+      els.recordPreviewRaw.src = '';
+      els.recordDiag.textContent = '';
       mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) recordChunks.push(e.data); };
       mediaRecorder.onstop = async () => {
-        els.recordStatus.textContent = '🛠 處理 MP3 中...';
-        try {
-          const captureBlob = new Blob(recordChunks, { type: recordMime || 'audio/webm' });
-          if (captureBlob.size === 0) throw new Error('錄到 0 byte');
-          const kbps = parseInt(els.recordBitrate.value, 10);
-          const mp3Blob = await encodeBlobToMp3(captureBlob, kbps);
-          const sizeMB = (mp3Blob.size / 1024 / 1024).toFixed(2);
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(mp3Blob);
-          const d = new Date();
-          const stamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`;
-          a.download = `voice-${stamp}.mp3`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-          els.recordStatus.textContent = `已儲存 ${sizeMB} MB`;
-        } catch (err) {
-          console.error('encode error', err);
-          showError(`轉 MP3 失敗：${err.message}。已用原始 webm 下載保底。`);
-          const fallback = new Blob(recordChunks, { type: recordMime || 'audio/webm' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(fallback);
-          const ext = (recordMime || 'audio/webm').includes('mp4') ? 'm4a'
+        const rawBlob = new Blob(recordChunks, { type: recordMime || 'audio/webm' });
+        const rawSize = (rawBlob.size / 1024).toFixed(1);
+        const rawExt = (recordMime || 'audio/webm').includes('mp4') ? 'm4a'
                     : (recordMime || 'audio/webm').includes('ogg') ? 'ogg' : 'webm';
-          a.download = `voice-fallback.${ext}`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-          els.recordStatus.textContent = '已下載 webm 保底';
-        } finally {
-          setTimeout(() => { if (!recordingActive) els.recordStatus.textContent = '未錄音'; }, 5000);
+        const d = new Date();
+        const stamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`;
+
+        // ALWAYS show webm preview + download first — this is the guaranteed-works path
+        const rawUrl = URL.createObjectURL(rawBlob);
+        els.recordPreviewRaw.src = rawUrl;
+        els.downloadRaw.href = rawUrl;
+        els.downloadRaw.download = `voice-${stamp}.${rawExt}`;
+        els.recordPreviewBox.style.display = 'block';
+        els.recordStatus.textContent = `✅ webm 已就緒 (${rawSize} KB)，背景轉 MP3 中...`;
+        els.recordDiag.textContent = `mime: ${recordMime || 'auto'} · webm size: ${rawSize} KB · chunks: ${recordChunks.length}`;
+
+        // Now best-effort MP3 in the background
+        try {
+          if (rawBlob.size === 0) throw new Error('錄到 0 byte');
+          const kbps = parseInt(els.recordBitrate.value, 10);
+          const mp3Blob = await encodeBlobToMp3(rawBlob, kbps);
+          const mp3SizeKB = (mp3Blob.size / 1024).toFixed(1);
+          const mp3Url = URL.createObjectURL(mp3Blob);
+          els.recordPreviewAudio.src = mp3Url;
+          els.downloadMp3.href = mp3Url;
+          els.downloadMp3.download = `voice-${stamp}.mp3`;
+          els.downloadMp3.style.display = 'inline-block';
+          const peakDb = mp3Blob._diagPeak > 0 ? (20 * Math.log10(mp3Blob._diagPeak)).toFixed(1) : '-∞';
+          els.recordStatus.innerHTML = `✅ webm + MP3 都好了 · webm ${rawSize} KB · MP3 ${mp3SizeKB} KB`;
+          els.recordDiag.textContent += ` · MP3 ${mp3SizeKB} KB · 原始峰值 ${peakDb} dB · 已 normalize (gain ${mp3Blob._diagGain.toFixed(2)}x)`;
+        } catch (err) {
+          console.error('MP3 encode error', err);
+          els.downloadMp3.style.display = 'none';
+          els.recordPreviewAudio.src = '';
+          els.recordStatus.textContent = `⚠️ MP3 編碼失敗：${err.message}（用 webm 就好）`;
+          els.recordDiag.textContent += ` · MP3 失敗: ${err.message}`;
         }
       };
       mediaRecorder.start(1000);
