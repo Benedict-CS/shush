@@ -289,6 +289,10 @@
         </select>
         <span class="hint" id="recordStatus" style="flex:1;align-self:center;">未錄音</span>
       </div>
+      <div class="controls" style="margin-top:10px;">
+        <button id="testMicBtn" class="secondary" disabled>🧪 測試麥克風（錄 3 秒自動播回）</button>
+      </div>
+      <div id="currentMicLabel" class="hint" style="margin-top:6px;">尚未開始監測</div>
       <div id="recordPreviewBox" style="display:none; margin-top:10px; padding:10px; background:#0d1117; border:1px solid var(--border); border-radius:8px;">
         <div class="hint" style="margin-bottom:6px;">🎧 預覽 webm（瀏覽器原生，最穩）</div>
         <audio id="recordPreviewRaw" controls style="width:100%; margin-bottom:8px;"></audio>
@@ -301,6 +305,20 @@
         <div class="hint" id="recordDiag" style="margin-top:6px; font-size:10px;"></div>
       </div>
       <div class="hint">熱鍵：<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> 暫停 · <kbd>Ctrl</kbd>+<kbd>R</kbd> 開始錄音 · <kbd>Ctrl</kbd>+<kbd>K</kbd> 停止錄音</div>
+    </div>
+
+    <!-- Speech to text -->
+    <div class="panel">
+      <div class="panel-title">語音轉文字
+        <span style="display:inline-flex; gap:6px; align-items:center;">
+          <label class="check" style="font-size:11px;"><input type="checkbox" id="sttEnabled"> 啟用</label>
+          <button id="sttClear" class="tiny">清空</button>
+        </span>
+      </div>
+      <div id="sttStatus" class="hint" style="margin-bottom:6px;">未啟用</div>
+      <div id="sttTranscript" style="min-height:60px; max-height:160px; overflow:auto; padding:10px; background:#0d1117; border:1px solid var(--border); border-radius:6px; font-size:13px; line-height:1.6;">
+        <span style="color:var(--muted);">啟用後在這裡顯示識別結果。如果它認得出字 = 麥克風一定正常。</span>
+      </div>
     </div>
 
     <!-- Timeline -->
@@ -501,7 +519,9 @@
     'todayCount','yesterdayCount','weekCount',
     'refreshHistory','exportCsv','clearLog','installBtn',
     'recordBtn','recordStatus','recordBitrate',
-    'recordPreviewBox','recordPreviewAudio','recordPreviewRaw','downloadMp3','downloadRaw','recordDiag'
+    'recordPreviewBox','recordPreviewAudio','recordPreviewRaw','downloadMp3','downloadRaw','recordDiag',
+    'testMicBtn','currentMicLabel',
+    'sttEnabled','sttStatus','sttTranscript','sttClear'
   ].forEach(id => els[id] = document.getElementById(id));
 
   const favicon = document.getElementById('favicon');
@@ -1033,6 +1053,9 @@
           echoCancellation: false, noiseSuppression: false, autoGainControl: false,
         }, video: false,
       });
+      const trackLabel = mediaStream.getAudioTracks()[0]?.label || '(未知)';
+      const trackSettings = mediaStream.getAudioTracks()[0]?.getSettings?.() || {};
+      els.currentMicLabel.innerHTML = `🎤 <strong>${trackLabel}</strong> · ${trackSettings.sampleRate || '?'} Hz · ${trackSettings.channelCount || '?'} ch`;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       sourceNode = audioCtx.createMediaStreamSource(mediaStream);
       analyser = audioCtx.createAnalyser();
@@ -1055,6 +1078,7 @@
       els.startBtn.textContent = '■ 停止'; els.startBtn.classList.add('stop');
       els.pauseBtn.disabled = false; els.calibrateBtn.disabled = false;
       els.recordBtn.disabled = false;
+      els.testMicBtn.disabled = false;
       els.status.textContent = '監測中'; els.status.classList.add('recording');
 
       await listDevices();
@@ -1089,6 +1113,8 @@
     els.pauseBtn.disabled = true; els.pauseBtn.textContent = '⏸ 暫停';
     els.calibrateBtn.disabled = true;
     els.recordBtn.disabled = true;
+    els.testMicBtn.disabled = true;
+    els.currentMicLabel.textContent = '尚未開始監測';
     els.status.textContent = '已停止'; els.status.classList.remove('recording','over','paused');
     els.levelCurrent.textContent = '—';
     els.levelCurrent.classList.remove('over');
@@ -1405,6 +1431,123 @@
   }
 
   els.recordBtn.addEventListener('click', toggleRecording);
+
+  // ===== Test mic (record 3 sec, auto-playback) =====
+  async function testMic() {
+    if (!running || !mediaStream) { showError('請先開始監測。'); return; }
+    els.testMicBtn.disabled = true;
+    const origText = els.testMicBtn.textContent;
+    try {
+      const mime = pickRecordMime();
+      const rec = new MediaRecorder(mediaStream, mime ? { mimeType: mime } : {});
+      const chunks = [];
+      rec.ondataavailable = e => { if (e.data?.size > 0) chunks.push(e.data); };
+      const done = new Promise(res => { rec.onstop = res; });
+      rec.start();
+      for (let i = 3; i > 0; i--) {
+        els.testMicBtn.textContent = `🧪 錄音中... ${i}`;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      rec.stop();
+      await done;
+      els.testMicBtn.textContent = '▶ 播放測試錄音中...';
+      const blob = new Blob(chunks, { type: mime || 'audio/webm' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.volume = 1;
+      // Decode for peak measurement
+      let peakDb = '?';
+      try {
+        const buf = await blob.arrayBuffer();
+        const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await tempCtx.decodeAudioData(buf);
+        tempCtx.close();
+        const ch = decoded.getChannelData(0);
+        let peak = 0;
+        for (let i = 0; i < ch.length; i++) if (Math.abs(ch[i]) > peak) peak = Math.abs(ch[i]);
+        peakDb = peak > 0 ? (20 * Math.log10(peak)).toFixed(1) + ' dB' : '-∞ dB（沒收到聲音）';
+      } catch (e) { peakDb = `decode 失敗: ${e.message}`; }
+      els.currentMicLabel.innerHTML += ` · 測試峰值 ${peakDb}`;
+      await audio.play();
+      await new Promise(r => { audio.onended = r; setTimeout(r, 5000); });
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      showError(`測試失敗：${e.message}`);
+    } finally {
+      els.testMicBtn.textContent = origText;
+      els.testMicBtn.disabled = !running;
+    }
+  }
+  els.testMicBtn.addEventListener('click', testMic);
+
+  // ===== Speech to text (Web Speech API) =====
+  let recognition = null;
+  let sttRestartTimer = null;
+  function buildRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const r = new SR();
+    r.lang = 'zh-TW';
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+    r.onresult = e => {
+      let interim = '', final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const txt = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += txt + ' ';
+        else interim += txt;
+      }
+      if (final) {
+        const p = document.createElement('div');
+        p.textContent = `[${new Date().toLocaleTimeString()}] ${final.trim()}`;
+        p.style.color = 'var(--text)';
+        els.sttTranscript.appendChild(p);
+        els.sttTranscript.scrollTop = els.sttTranscript.scrollHeight;
+      }
+      els.sttStatus.textContent = interim ? `識別中: ${interim}` : '監聽中...';
+    };
+    r.onerror = e => {
+      els.sttStatus.textContent = `錯誤: ${e.error}${e.error === 'not-allowed' ? '（需要麥克風權限）' : ''}`;
+    };
+    r.onend = () => {
+      els.sttStatus.textContent = '已停止，自動重啟中...';
+      if (els.sttEnabled.checked && !sttRestartTimer) {
+        sttRestartTimer = setTimeout(() => {
+          sttRestartTimer = null;
+          if (els.sttEnabled.checked) try { r.start(); } catch {}
+        }, 500);
+      }
+    };
+    return r;
+  }
+  function startStt() {
+    if (recognition) try { recognition.stop(); } catch {}
+    recognition = buildRecognition();
+    if (!recognition) {
+      els.sttStatus.textContent = '⚠️ 瀏覽器不支援 Web Speech API（請用 Chrome / Edge）';
+      els.sttEnabled.checked = false;
+      return;
+    }
+    try {
+      recognition.start();
+      els.sttStatus.textContent = '監聽中...';
+    } catch (e) {
+      els.sttStatus.textContent = `啟動失敗: ${e.message}`;
+    }
+  }
+  function stopStt() {
+    if (recognition) try { recognition.stop(); } catch {}
+    recognition = null;
+    if (sttRestartTimer) { clearTimeout(sttRestartTimer); sttRestartTimer = null; }
+    els.sttStatus.textContent = '未啟用';
+  }
+  els.sttEnabled.addEventListener('change', () => {
+    if (els.sttEnabled.checked) startStt(); else stopStt();
+  });
+  els.sttClear.addEventListener('click', () => {
+    els.sttTranscript.innerHTML = '<span style="color:var(--muted);">已清空</span>';
+  });
 
   // ===== Hotkey =====
   window.addEventListener('keydown', e => {
