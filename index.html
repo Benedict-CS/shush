@@ -1390,7 +1390,8 @@
     return mp3Blob;
   }
 
-  function startRecording() {
+  let recordCleanStream = null;
+  async function startRecording() {
     if (!running || !mediaStream) { showError('請先開始監測再錄音。'); return; }
     if (recordingActive) return;
     if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
@@ -1398,9 +1399,27 @@
       return;
     }
     try {
+      // Get a SEPARATE mic stream with browser-side noise suppression enabled,
+      // just for the recording. The monitoring stream (mediaStream) stays raw
+      // for accurate dB metering.
+      const deviceId = els.deviceSelect.value;
+      try {
+        recordCleanStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+      } catch (e) {
+        console.warn('Clean stream failed, falling back to raw:', e);
+        recordCleanStream = mediaStream;
+      }
       recordMime = pickRecordMime();
       const opts = recordMime ? { mimeType: recordMime } : {};
-      mediaRecorder = new MediaRecorder(mediaStream, opts);
+      mediaRecorder = new MediaRecorder(recordCleanStream, opts);
       recordChunks = [];
       // Clear any previous preview
       els.recordPreviewBox.style.display = 'none';
@@ -1469,6 +1488,11 @@
     recordingActive = false;
     if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
     try { mediaRecorder?.stop(); } catch (e) { console.warn(e); }
+    // Release the clean recording stream (separate from the monitoring stream)
+    if (recordCleanStream && recordCleanStream !== mediaStream) {
+      try { recordCleanStream.getTracks().forEach(t => t.stop()); } catch {}
+    }
+    recordCleanStream = null;
     els.recordBtn.textContent = '● 開始錄音 (MP3)';
     els.recordBtn.style.background = '';
     els.recordBtn.style.color = '';
