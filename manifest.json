@@ -1,0 +1,23 @@
+{
+  "name": "Shush — Mic Volume Monitor",
+  "short_name": "Shush",
+  "description": "Browser-based mic volume monitor that warns you (with a dog bark!) when you're talking too loudly.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1419",
+  "theme_color": "#0f1419",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

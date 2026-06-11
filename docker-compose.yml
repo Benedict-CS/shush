@@ -1,0 +1,21 @@
+services:
+  shush:
+    build: .
+    image: shush:latest
+    container_name: shush
+    restart: unless-stopped
+    ports:
+      - "${SHUSH_PORT:-8080}:80"
+    # If you put this on the same Docker network as your existing nginx
+    # reverse proxy, you can drop the host port and use the container name.
+    # networks:
+    #   - proxy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+# networks:
+#   proxy:
+#     external: true

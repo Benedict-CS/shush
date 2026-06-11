@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f1419">
+<title>Shush — Shush</title>
+<link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2358a6ff'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' font-size='40' font-family='sans-serif' fill='white' dominant-baseline='middle'%3E🎙%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.json">
+<script src="vendor/lame.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2028;
+    --border: #2a3441;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 20px;
+    transition: background 0.1s;
+  }
+  body.warning { background: #3d0f12; }
+  body.warning-quiet { background: #1a2e3d; }
+  .container { width: 100%; max-width: 640px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 14px;
+  }
+  .panel-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .meter-wrap {
+    position: relative; height: 28px; background: #0d1117;
+    border-radius: 6px; overflow: hidden; margin-bottom: 12px;
+    border: 1px solid var(--border);
+  }
+  .meter-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(to right, var(--green) 0%, var(--green) 50%, var(--yellow) 70%, var(--red) 90%);
+    transition: width 0.05s linear;
+  }
+  .meter-threshold {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.6);
+    pointer-events: none;
+  }
+  .meter-threshold-quiet {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: var(--blue); box-shadow: 0 0 4px var(--blue);
+    pointer-events: none; opacity: 0.7;
+  }
+  .level-display { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 12px; }
+  .level-current { font-size: 36px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .level-current.over { color: var(--red); }
+  .level-current.under { color: var(--blue); }
+  .level-unit { color: var(--muted); font-size: 14px; margin-left: 4px; }
+  .level-info { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.recording { color: var(--green); }
+  .status.over { color: var(--red); font-weight: 600; }
+  .status.under { color: var(--blue); font-weight: 600; }
+  .status.paused { color: var(--yellow); }
+  .controls { display: flex; gap: 10px; }
+  button {
+    flex: 1; padding: 11px; border: none; border-radius: 8px;
+    background: var(--blue); color: white; font-size: 14px;
+    font-weight: 600; cursor: pointer; font-family: inherit;
+    transition: opacity 0.15s, transform 0.05s;
+  }
+  button:hover { opacity: 0.9; }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.stop { background: #6e7681; }
+  button.secondary {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text); flex: 0 0 auto; padding: 10px 14px;
+  }
+  button.tiny {
+    flex: 0 0 auto; padding: 6px 10px; font-size: 12px;
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+  }
+  button.ghost {
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+  }
+  .settings { display: grid; gap: 14px; }
+  .settings-section { border-top: 1px solid var(--border); padding-top: 14px; }
+  .settings-section:first-child { border-top: none; padding-top: 0; }
+  .settings-section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 10px; cursor: pointer;
+    user-select: none; display: flex; align-items: center; gap: 6px;
+  }
+  .settings-section-title::before {
+    content: '▼'; font-size: 9px; transition: transform 0.15s;
+  }
+  .settings-section.collapsed .settings-section-title::before {
+    transform: rotate(-90deg);
+  }
+  .settings-section.collapsed .settings-section-body { display: none; }
+  .settings-section-body { display: grid; gap: 12px; }
+  .setting-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .setting-row > label:first-child {
+    flex: 0 0 120px; font-size: 13px; color: var(--muted);
+  }
+  .setting-row label.check {
+    flex: 1; font-size: 13px; color: var(--text);
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+  }
+  .setting-row input[type=range] { flex: 1; min-width: 100px; accent-color: var(--blue); }
+  .setting-row .value {
+    flex: 0 0 70px; text-align: right;
+    font-variant-numeric: tabular-nums; font-size: 13px;
+  }
+  .setting-row input[type=time], .setting-row input[type=number] {
+    background: #0d1117; border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 10px; font-family: inherit; font-size: 13px;
+  }
+  .setting-row input[type=number] { width: 80px; }
+  .device-select {
+    width: 100%; flex: 1; padding: 8px 10px; background: #0d1117;
+    border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-family: inherit; font-size: 13px;
+  }
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; text-align: center;
+  }
+  .stat {
+    background: #0d1117; border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 6px;
+  }
+  .stat-label {
+    color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 4px;
+  }
+  .stat-value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat.streak .stat-value { color: var(--purple); }
+  .warning-banner {
+    display: none; background: var(--red); color: white;
+    padding: 14px; border-radius: 8px; text-align: center;
+    font-weight: 600; margin-bottom: 12px;
+    animation: pulse 0.6s ease-in-out infinite;
+  }
+  .warning-banner.show { display: block; }
+  .warning-banner.quiet { background: var(--blue); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+  .error {
+    background: #3d0f12; border: 1px solid var(--red); color: var(--red);
+    padding: 12px; border-radius: 8px; margin-bottom: 12px;
+    font-size: 13px; display: none;
+  }
+  .error.show { display: block; }
+  canvas.timeline { display: block; width: 100%; height: 120px; border-radius: 6px; background: #0d1117; }
+  canvas.histogram { display: block; width: 100%; height: 100px; border-radius: 6px; background: #0d1117; }
+  .history-summary {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-bottom: 12px;
+  }
+  .history-cell {
+    background: #0d1117; border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px; text-align: center;
+  }
+  .history-cell-label { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .history-cell-value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .history-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .install-btn {
+    background: linear-gradient(135deg, #58a6ff, #bc8cff);
+    color: white; border: none; padding: 12px; border-radius: 8px;
+    width: 100%; font-weight: 600; cursor: pointer; margin-bottom: 14px;
+  }
+  .install-btn[hidden] { display: none; }
+  .hint {
+    font-size: 11px; color: var(--muted); margin-top: 4px;
+  }
+  .hint kbd {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 5px; font-family: monospace; font-size: 10px;
+  }
+  .level-badges {
+    display: flex; gap: 4px; margin-top: 4px;
+  }
+  .level-badge {
+    width: 18px; height: 5px; border-radius: 2px;
+    background: var(--border);
+  }
+  .level-badge.lit-1 { background: var(--yellow); }
+  .level-badge.lit-2 { background: #ff9636; }
+  .level-badge.lit-3 { background: var(--red); }
+  .level-badge.lit-4 { background: var(--purple); }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 600px) {
+    body { padding: 12px; align-items: stretch; }
+    .container { max-width: 100%; }
+    h1 { font-size: 19px; }
+    .subtitle { font-size: 12px; margin-bottom: 14px; }
+    .panel { padding: 14px; border-radius: 10px; margin-bottom: 10px; }
+    .panel-title { margin-bottom: 10px; }
+    .level-display { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .level-info { align-items: flex-start; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+    .level-current { font-size: 30px; }
+    .controls { flex-wrap: wrap; }
+    .controls button { min-width: calc(50% - 5px); flex: 1 1 calc(50% - 5px); }
+    button { padding: 10px; font-size: 13px; }
+    button.secondary, button.tiny { padding: 9px 12px; }
+    .setting-row { flex-wrap: wrap; gap: 8px; }
+    .setting-row > label:first-child { flex: 1 0 100%; }
+    .setting-row .value { flex: 0 0 auto; min-width: 60px; }
+    .setting-row input[type=range] { flex: 1 1 auto; min-width: 0; width: auto; }
+    .setting-row input[type=time], .setting-row input[type=number] { flex: 1 1 auto; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat-value { font-size: 18px; }
+    .history-summary { grid-template-columns: 1fr; }
+    canvas.timeline { height: 100px; }
+    canvas.histogram { height: 90px; }
+    #recordBitrate { flex: 1 1 auto; }
+    .hint { font-size: 10px; }
+    .vad-pill { font-size: 10px; }
+  }
+  @media (max-width: 380px) {
+    .stats { grid-template-columns: 1fr 1fr; gap: 6px; }
+    .stat { padding: 10px 4px; }
+    .level-current { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎙️ Shush</h1>
+    <p class="subtitle">講話太大聲就提醒你 · Mic volume guardian</p>
+
+    <button id="installBtn" class="install-btn" hidden>📲 安裝為桌面 App</button>
+
+    <div class="error" id="error"></div>
+    <div class="warning-banner" id="warning">⚠️ 太大聲了！小聲一點</div>
+
+    <!-- Live monitor -->
+    <div class="panel">
+      <div class="level-display">
+        <div>
+          <span class="level-current" id="levelCurrent">—</span>
+          <span class="level-unit">dB</span>
+        </div>
+        <div class="level-info">
+          <div class="status" id="status">尚未開始</div>
+          <div class="level-badges" id="levelBadges" title="警告等級">
+            <div class="level-badge"></div>
+            <div class="level-badge"></div>
+            <div class="level-badge"></div>
+            <div class="level-badge"></div>
+          </div>
+        </div>
+      </div>
+      <div class="meter-wrap">
+        <div class="meter-fill" id="meterFill"></div>
+        <div class="meter-threshold-quiet" id="meterThresholdQuiet" style="left: 30%; display:none;"></div>
+        <div class="meter-threshold" id="meterThreshold" style="left: 70%"></div>
+      </div>
+      <div class="controls">
+        <button id="startBtn">▶ 開始監測</button>
+        <button id="pauseBtn" class="secondary" disabled>⏸ 暫停</button>
+        <button id="calibrateBtn" class="secondary" disabled>校正</button>
+      </div>
+      <div class="controls" style="margin-top:10px;">
+        <button id="recordBtn" class="secondary" disabled>● 開始錄音 (MP3)</button>
+        <select id="recordBitrate" class="device-select" style="flex:0 0 100px;">
+          <option value="64">64 kbps</option>
+          <option value="96">96 kbps</option>
+          <option value="128" selected>128 kbps</option>
+          <option value="192">192 kbps</option>
+        </select>
+        <span class="hint" id="recordStatus" style="flex:1;align-self:center;">未錄音</span>
+      </div>
+      <div class="hint">熱鍵：<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> 暫停 · <kbd>Ctrl</kbd>+<kbd>R</kbd> 開始錄音 · <kbd>Ctrl</kbd>+<kbd>K</kbd> 停止錄音</div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="panel">
+      <div class="panel-title">即時時間軸（最近 60 秒）</div>
+      <canvas class="timeline" id="timeline" width="1200" height="240"></canvas>
+    </div>
+
+    <!-- Stats -->
+    <div class="panel">
+      <div class="stats">
+        <div class="stat"><div class="stat-label">峰值 dB</div><div class="stat-value" id="statPeak">—</div></div>
+        <div class="stat"><div class="stat-label">平均 dB</div><div class="stat-value" id="statAvg">—</div></div>
+        <div class="stat"><div class="stat-label">警告次數</div><div class="stat-value" id="statWarnings">0</div></div>
+        <div class="stat streak"><div class="stat-label">連勝天數</div><div class="stat-value" id="statStreak">0</div></div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="panel">
+      <div class="panel-title">設定</div>
+      <div class="settings">
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>基本</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label for="deviceSelect">麥克風</label>
+              <select id="deviceSelect" class="device-select"><option>預設裝置</option></select>
+            </div>
+            <div class="setting-row">
+              <label for="threshold">大聲閾值</label>
+              <input type="range" id="threshold" min="-60" max="0" value="-18" step="1">
+              <span class="value" id="thresholdVal">-18 dB</span>
+            </div>
+            <div class="setting-row">
+              <label for="holdMs">觸發時間</label>
+              <input type="range" id="holdMs" min="50" max="2000" value="300" step="50">
+              <span class="value" id="holdMsVal">300 ms</span>
+            </div>
+            <div class="setting-row">
+              <label for="cooldown">警告冷卻</label>
+              <input type="range" id="cooldown" min="500" max="10000" value="2000" step="500">
+              <span class="value" id="cooldownVal">2.0 s</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>太小聲警告（開會用）</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="quietEnabled"> 講話太小聲時提醒</label>
+            </div>
+            <div class="setting-row">
+              <label for="quietThreshold">小聲閾值</label>
+              <input type="range" id="quietThreshold" min="-60" max="-10" value="-40" step="1">
+              <span class="value" id="quietThresholdVal">-40 dB</span>
+            </div>
+            <div class="setting-row">
+              <label for="quietHoldMs">觸發時間</label>
+              <input type="range" id="quietHoldMs" min="500" max="5000" value="2000" step="100">
+              <span class="value" id="quietHoldMsVal">2.0 s</span>
+            </div>
+            <div class="hint">會在偵測到聲音（&gt; -55 dB）但低於閾值時提醒，靜音時不會誤報</div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>漸進警告</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="escalateEnabled" checked> 連續超標時加重警告（避免麻木）</label>
+            </div>
+            <div class="setting-row">
+              <label for="escalateWindow">窗口</label>
+              <input type="range" id="escalateWindow" min="60" max="600" value="180" step="30">
+              <span class="value" id="escalateWindowVal">3.0 min</span>
+            </div>
+            <div class="hint">L1 嗶聲 → L2 音效 → L3 音效+閃爍 → L4 語音「小聲一點」</div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>音效</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="beepEnabled" checked> 播放警告音</label>
+            </div>
+            <div class="setting-row">
+              <label for="soundSelect">警告音效</label>
+              <select id="soundSelect" class="device-select">
+                <option value="beep">嗶聲（合成）</option>
+                <option value="sounds/dog-466.mp3" selected>狗叫 1</option>
+                <option value="sounds/dog-467.mp3">狗叫 2</option>
+                <option value="sounds/dog-468.mp3">狗叫 3</option>
+                <option value="sounds/dog-49.mp3">狗 4</option>
+                <option value="sounds/dog-50.mp3">狗 5</option>
+                <option value="sounds/dog-51.mp3">狗 6</option>
+                <option value="sounds/dog-52.mp3">狗 7</option>
+                <option value="sounds/dog-53.mp3">狗 8</option>
+                <option value="sounds/dog-54.mp3">狗 9</option>
+                <option value="sounds/dog-55.mp3">狗 10</option>
+                <option value="sounds/dog-1.mp3">狗 11</option>
+                <option value="custom">自訂檔案...</option>
+              </select>
+              <button id="previewSound" class="tiny">試聽</button>
+            </div>
+            <div class="setting-row" id="customFileRow" style="display:none;">
+              <label for="customFile">自訂音效</label>
+              <input type="file" id="customFile" accept="audio/*" style="flex:1;color:var(--muted);font-size:12px;">
+            </div>
+            <div class="setting-row">
+              <label for="soundVolume">音效音量</label>
+              <input type="range" id="soundVolume" min="0" max="1000" value="500" step="25">
+              <span class="value" id="soundVolumeVal">500%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>通知 / 標題</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="notifyEnabled" checked> 系統通知（背景時也會跳）</label>
+            </div>
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="titleEnabled" checked> 分頁標題顯示 dB</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>排程</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="scheduleEnabled"> 啟用排程（時段內自動開始）</label>
+            </div>
+            <div class="setting-row">
+              <label for="scheduleStart">開始</label>
+              <input type="time" id="scheduleStart" value="09:00">
+              <label for="scheduleEnd" style="flex:0 0 auto;">結束</label>
+              <input type="time" id="scheduleEnd" value="18:00">
+            </div>
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="weekdaysOnly" checked> 只在週一到週五</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>每日目標 / 連勝</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label for="dailyGoal">每日警告上限</label>
+              <input type="number" id="dailyGoal" min="1" max="100" value="10">
+              <span class="hint" style="flex:1;">當日警告少於這個數字 = 達標</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="panel">
+      <div class="panel-title">紀錄與模式
+        <button id="refreshHistory" class="tiny">重新整理</button>
+      </div>
+      <div class="history-summary">
+        <div class="history-cell">
+          <div class="history-cell-label">今天</div>
+          <div class="history-cell-value" id="todayCount">0</div>
+        </div>
+        <div class="history-cell">
+          <div class="history-cell-label">昨天</div>
+          <div class="history-cell-value" id="yesterdayCount">0</div>
+        </div>
+        <div class="history-cell">
+          <div class="history-cell-label">最近 7 天</div>
+          <div class="history-cell-value" id="weekCount">0</div>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:8px;">今日各小時警告次數</div>
+      <canvas class="histogram" id="histogram" width="1200" height="200"></canvas>
+      <div class="history-actions">
+        <button id="exportCsv" class="ghost">匯出 CSV</button>
+        <button id="clearLog" class="ghost">清除全部紀錄</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Constants =====
+  const MIN_DB = -60;
+  const TIMELINE_SECONDS = 60;
+  const ESCALATE_LEVELS = 4;
+  const PREFS_KEY = 'voiceMonitorPrefs';
+  const STREAK_KEY = 'voiceMonitorStreak';
+  const DB_NAME = 'voiceMonitor';
+  const DB_VERSION = 1;
+  const QUIET_NOISE_FLOOR = -55;
+
+  // ===== Element refs =====
+  const els = {};
+  [
+    'startBtn','pauseBtn','calibrateBtn','deviceSelect',
+    'threshold','thresholdVal','holdMs','holdMsVal','cooldown','cooldownVal',
+    'quietEnabled','quietThreshold','quietThresholdVal','quietHoldMs','quietHoldMsVal',
+    'meterThresholdQuiet',
+    'escalateEnabled','escalateWindow','escalateWindowVal','levelBadges',
+    'beepEnabled','soundSelect','previewSound','customFile','customFileRow',
+    'soundVolume','soundVolumeVal',
+    'notifyEnabled','titleEnabled',
+    'scheduleEnabled','scheduleStart','scheduleEnd','weekdaysOnly',
+    'dailyGoal',
+    'levelCurrent','status','meterFill','meterThreshold',
+    'warning','error',
+    'statPeak','statAvg','statWarnings','statStreak',
+    'timeline','histogram',
+    'todayCount','yesterdayCount','weekCount',
+    'refreshHistory','exportCsv','clearLog','installBtn',
+    'recordBtn','recordStatus','recordBitrate'
+  ].forEach(id => els[id] = document.getElementById(id));
+
+  const favicon = document.getElementById('favicon');
+  const ORIGINAL_TITLE = document.title;
+
+  // ===== State =====
+  let audioCtx = null, mediaStream = null, analyser = null, sourceNode = null;
+  let running = false, paused = false, loopTimerId = null, drawRafId = null;
+  let keepAliveGain = null;
+  let overSince = null, lastWarnAt = 0;
+  let quietSince = null, lastQuietAt = 0;
+  let warningCount = 0, peakDb = -Infinity, avgSum = 0, avgN = 0;
+  let recentWarningTs = [];
+  let timelineBuf = [];
+  let timelineWarnings = [];
+  let lastTitleUpdate = 0, lastFaviconColor = '';
+
+  // ===== Utilities =====
+  function showError(msg) { els.error.textContent = msg; els.error.classList.add('show'); }
+  function clearError() { els.error.classList.remove('show'); }
+  function dbToPct(db) {
+    const c = Math.max(MIN_DB, Math.min(0, db));
+    return ((c - MIN_DB) / (0 - MIN_DB)) * 100;
+  }
+  function todayKey(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function startOfDay(d = new Date()) {
+    const x = new Date(d); x.setHours(0,0,0,0); return x.getTime();
+  }
+
+  // ===== UI setters =====
+  function setRangeLabel(el, fmt) { el.addEventListener('input', () => fmt()); fmt(); }
+  setRangeLabel(els.threshold, () => { els.thresholdVal.textContent = `${els.threshold.value} dB`; els.meterThreshold.style.left = `${dbToPct(parseInt(els.threshold.value,10))}%`; });
+  setRangeLabel(els.holdMs, () => { els.holdMsVal.textContent = `${els.holdMs.value} ms`; });
+  setRangeLabel(els.cooldown, () => { els.cooldownVal.textContent = `${(parseInt(els.cooldown.value,10)/1000).toFixed(1)} s`; });
+  setRangeLabel(els.quietThreshold, () => { els.quietThresholdVal.textContent = `${els.quietThreshold.value} dB`; els.meterThresholdQuiet.style.left = `${dbToPct(parseInt(els.quietThreshold.value,10))}%`; });
+  setRangeLabel(els.quietHoldMs, () => { els.quietHoldMsVal.textContent = `${(parseInt(els.quietHoldMs.value,10)/1000).toFixed(1)} s`; });
+  setRangeLabel(els.escalateWindow, () => { els.escalateWindowVal.textContent = `${(parseInt(els.escalateWindow.value,10)/60).toFixed(1)} min`; });
+  setRangeLabel(els.soundVolume, () => { els.soundVolumeVal.textContent = `${els.soundVolume.value}%`; });
+
+  function updateQuietThresholdVisibility() {
+    els.meterThresholdQuiet.style.display = els.quietEnabled.checked ? 'block' : 'none';
+  }
+  els.quietEnabled.addEventListener('change', updateQuietThresholdVisibility);
+  updateQuietThresholdVisibility();
+
+  // Collapsible sections
+  document.querySelectorAll('[data-section]').forEach(t => {
+    t.addEventListener('click', () => t.parentElement.classList.toggle('collapsed'));
+  });
+
+  // ===== Prefs =====
+  function savePrefs() {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({
+        threshold: els.threshold.value, holdMs: els.holdMs.value, cooldown: els.cooldown.value,
+        quietEnabled: els.quietEnabled.checked, quietThreshold: els.quietThreshold.value, quietHoldMs: els.quietHoldMs.value,
+        escalateEnabled: els.escalateEnabled.checked, escalateWindow: els.escalateWindow.value,
+        beepEnabled: els.beepEnabled.checked,
+        soundSelect: els.soundSelect.value === 'custom' ? 'beep' : els.soundSelect.value,
+        soundVolume: els.soundVolume.value,
+        notifyEnabled: els.notifyEnabled.checked, titleEnabled: els.titleEnabled.checked,
+        scheduleEnabled: els.scheduleEnabled.checked,
+        scheduleStart: els.scheduleStart.value, scheduleEnd: els.scheduleEnd.value,
+        weekdaysOnly: els.weekdaysOnly.checked,
+        dailyGoal: els.dailyGoal.value,
+      }));
+    } catch {}
+  }
+  function loadPrefs() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+      const set = (key, prop) => { if (p[key] != null) els[key][prop] = p[key]; };
+      ['threshold','holdMs','cooldown','quietThreshold','quietHoldMs',
+       'escalateWindow','soundSelect','soundVolume','scheduleStart','scheduleEnd','dailyGoal']
+        .forEach(k => set(k, 'value'));
+      ['quietEnabled','escalateEnabled','beepEnabled','notifyEnabled',
+       'titleEnabled','scheduleEnabled','weekdaysOnly']
+        .forEach(k => { if (typeof p[k] === 'boolean') els[k].checked = p[k]; });
+      // refresh labels
+      [els.threshold,els.holdMs,els.cooldown,els.quietThreshold,
+       els.quietHoldMs,els.escalateWindow,els.soundVolume].forEach(el => el.dispatchEvent(new Event('input')));
+      updateQuietThresholdVisibility();
+    } catch {}
+  }
+  loadPrefs();
+  ['change', 'input'].forEach(ev => {
+    Object.values(els).filter(el => el && el.tagName && (el.tagName === 'INPUT' || el.tagName === 'SELECT'))
+      .forEach(el => el.addEventListener(ev, savePrefs));
+  });
+
+  // ===== IndexedDB log =====
+  let idb = null;
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('events')) {
+          const s = db.createObjectStore('events', { keyPath: 'id', autoIncrement: true });
+          s.createIndex('ts', 'ts');
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function getDb() { if (!idb) idb = await openDb(); return idb; }
+  async function logEvent(ev) {
+    try {
+      const db = await getDb();
+      await new Promise((res, rej) => {
+        const tx = db.transaction('events', 'readwrite');
+        tx.objectStore('events').add(ev);
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+    } catch (e) { console.warn('logEvent failed:', e); }
+  }
+  async function queryEvents(fromTs, toTs) {
+    const db = await getDb();
+    return new Promise((res, rej) => {
+      const out = [];
+      const tx = db.transaction('events');
+      const idx = tx.objectStore('events').index('ts');
+      const range = IDBKeyRange.bound(fromTs, toTs);
+      idx.openCursor(range).onsuccess = e => {
+        const c = e.target.result;
+        if (c) { out.push(c.value); c.continue(); } else res(out);
+      };
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+  async function clearAllEvents() {
+    const db = await getDb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('events', 'readwrite');
+      tx.objectStore('events').clear();
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  }
+
+  // ===== Devices =====
+  async function listDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === 'audioinput');
+      const current = els.deviceSelect.value;
+      els.deviceSelect.innerHTML = '';
+      const def = document.createElement('option');
+      def.value = ''; def.textContent = '預設裝置';
+      els.deviceSelect.appendChild(def);
+      mics.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d.deviceId;
+        o.textContent = d.label || `麥克風 ${d.deviceId.slice(0,6)}`;
+        els.deviceSelect.appendChild(o);
+      });
+      els.deviceSelect.value = current;
+    } catch (e) { console.warn(e); }
+  }
+
+  // ===== Warning audio chain (compressor + gain for loud playback) =====
+  let warningCtx = null, warningSourceNode = null, warningCompressor = null, warningGainNode = null;
+  let warningAudioEl = null, customFileUrl = null;
+
+  function getWarningCtx() {
+    if (audioCtx && audioCtx.state !== 'closed') return audioCtx;
+    if (!warningCtx || warningCtx.state === 'closed') {
+      warningCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (warningCtx.state === 'suspended') warningCtx.resume();
+    return warningCtx;
+  }
+  function getVolumeGain() { return parseInt(els.soundVolume.value, 10) / 100; }
+
+  function ensureGraph() {
+    const ctx = getWarningCtx();
+    if (!warningAudioEl) { warningAudioEl = new Audio(); warningAudioEl.crossOrigin = 'anonymous'; }
+    if (!warningSourceNode) {
+      try {
+        warningSourceNode = ctx.createMediaElementSource(warningAudioEl);
+        warningCompressor = ctx.createDynamicsCompressor();
+        warningCompressor.threshold.value = -24; warningCompressor.knee.value = 30;
+        warningCompressor.ratio.value = 12; warningCompressor.attack.value = 0.003;
+        warningCompressor.release.value = 0.25;
+        warningGainNode = ctx.createGain();
+        warningSourceNode.connect(warningCompressor).connect(warningGainNode).connect(ctx.destination);
+      } catch (e) { console.warn('media source create failed:', e); }
+    }
+    return ctx;
+  }
+
+  function playSynthBeep(freq = 880, durMs = 200) {
+    const ctx = getWarningCtx();
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.frequency.value = freq; osc.type = 'sine';
+    const vol = getVolumeGain() * 0.4;
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.01, vol), t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + durMs / 1000);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(); osc.stop(t + durMs / 1000 + 0.02);
+  }
+
+  function getWarningSoundUrl() {
+    const v = els.soundSelect.value;
+    if (v === 'beep') return null;
+    if (v === 'custom') return customFileUrl;
+    return v;
+  }
+
+  function playWarningSound() {
+    const url = getWarningSoundUrl();
+    if (!url) { playSynthBeep(); return; }
+    try {
+      const ctx = ensureGraph();
+      const fullUrl = new URL(url, location.href).href;
+      if (warningAudioEl.src !== fullUrl) warningAudioEl.src = fullUrl;
+      if (warningGainNode) {
+        warningGainNode.gain.setValueAtTime(getVolumeGain(), ctx.currentTime);
+        warningAudioEl.volume = 1.0;
+      } else {
+        warningAudioEl.volume = Math.min(1, getVolumeGain());
+      }
+      warningAudioEl.currentTime = 0;
+      warningAudioEl.play().catch(e => { console.warn('audio play failed:', e); playSynthBeep(); });
+    } catch (e) { playSynthBeep(); }
+  }
+
+  function speakWarning(text) {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-TW'; u.rate = 1.1; u.volume = 1;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } catch (e) { console.warn('TTS failed', e); }
+  }
+
+  // ===== Notifications =====
+  let lastNotif = null;
+  function fireSystemNotification(title, body) {
+    if (!els.notifyEnabled.checked) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      if (lastNotif) try { lastNotif.close(); } catch {}
+      lastNotif = new Notification(title, { body, tag: 'voice-monitor-warning', silent: true });
+      setTimeout(() => { try { lastNotif?.close(); } catch {} }, 3000);
+    } catch (e) { console.warn(e); }
+  }
+  async function ensureNotificationPermission() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    try { return (await Notification.requestPermission()) === 'granted'; }
+    catch { return false; }
+  }
+
+  // ===== Escalation =====
+  function currentEscalationLevel() {
+    if (!els.escalateEnabled.checked) return 1;
+    const win = parseInt(els.escalateWindow.value, 10) * 1000;
+    const now = performance.now();
+    recentWarningTs = recentWarningTs.filter(t => now - t < win);
+    return Math.min(ESCALATE_LEVELS, recentWarningTs.length + 1);
+  }
+  function updateLevelBadges(level) {
+    const bs = els.levelBadges.querySelectorAll('.level-badge');
+    bs.forEach((b, i) => {
+      b.className = 'level-badge' + (i < level ? ` lit-${Math.min(level, 4)}` : '');
+    });
+  }
+
+  function triggerWarning(currentDb) {
+    warningCount++;
+    els.statWarnings.textContent = warningCount;
+    recentWarningTs.push(performance.now());
+    const level = currentEscalationLevel();
+    updateLevelBadges(level);
+    els.warning.classList.remove('quiet');
+    els.warning.textContent = '⚠️ 太大聲了！小聲一點';
+    els.warning.classList.add('show');
+    document.body.classList.add('warning');
+    timelineWarnings.push({ ts: performance.now(), db: currentDb });
+
+    if (els.beepEnabled.checked) {
+      if (level === 1) playSynthBeep(880, 200);
+      else if (level === 2) playWarningSound();
+      else if (level === 3) { playWarningSound(); setTimeout(playWarningSound, 350); }
+      else if (level === 4) { playWarningSound(); speakWarning('小聲一點'); }
+    }
+
+    fireSystemNotification(`⚠️ 太大聲 L${level}`, `當前 ${currentDb.toFixed(1)} dB`);
+
+    const flashMs = level >= 3 ? 1800 : 800;
+    setTimeout(() => {
+      els.warning.classList.remove('show');
+      document.body.classList.remove('warning');
+    }, flashMs);
+
+    logEvent({ ts: Date.now(), db: currentDb, level, type: 'loud' });
+    scheduleHistoryRefresh();
+    scheduleStreakRefresh();
+  }
+
+  function triggerQuietWarning(currentDb) {
+    els.warning.classList.add('quiet');
+    els.warning.textContent = '🔉 太小聲了！說大聲一點';
+    els.warning.classList.add('show');
+    document.body.classList.add('warning-quiet');
+    if (els.beepEnabled.checked) playSynthBeep(440, 250);
+    fireSystemNotification('🔉 太小聲', `當前 ${currentDb.toFixed(1)} dB`);
+    setTimeout(() => {
+      els.warning.classList.remove('show');
+      els.warning.classList.remove('quiet');
+      document.body.classList.remove('warning-quiet');
+    }, 1200);
+    logEvent({ ts: Date.now(), db: currentDb, level: 1, type: 'quiet' });
+  }
+
+  // ===== Title / favicon =====
+  function buildFavicon(color) {
+    return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='${encodeURIComponent(color)}'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' font-size='40' font-family='sans-serif' fill='white' dominant-baseline='middle'%3E🎙%3C/text%3E%3C/svg%3E`;
+  }
+  function updateTitleAndFavicon(db, threshold) {
+    const now = performance.now();
+    if (now - lastTitleUpdate < 200) return;
+    lastTitleUpdate = now;
+    if (els.titleEnabled.checked) {
+      const over = db > threshold;
+      document.title = `${over ? '⚠️ ' : ''}${db.toFixed(0)} dB · Shush`;
+    } else if (document.title !== ORIGINAL_TITLE) {
+      document.title = ORIGINAL_TITLE;
+    }
+    let color;
+    if (db > threshold) color = '#f85149';
+    else if (db > threshold - 6) color = '#d29922';
+    else color = '#3fb950';
+    if (color !== lastFaviconColor) { favicon.href = buildFavicon(color); lastFaviconColor = color; }
+  }
+  function resetTitleAndFavicon() {
+    document.title = ORIGINAL_TITLE;
+    favicon.href = buildFavicon('#58a6ff');
+    lastFaviconColor = '';
+  }
+
+  // ===== Timeline canvas =====
+  const tCtx = els.timeline.getContext('2d');
+  function drawTimeline() {
+    const w = els.timeline.width, h = els.timeline.height;
+    tCtx.fillStyle = '#0d1117'; tCtx.fillRect(0,0,w,h);
+    const now = performance.now();
+    const windowMs = TIMELINE_SECONDS * 1000;
+    timelineBuf = timelineBuf.filter(p => now - p.ts < windowMs);
+    timelineWarnings = timelineWarnings.filter(p => now - p.ts < windowMs);
+
+    const threshold = parseInt(els.threshold.value, 10);
+    const quietT = parseInt(els.quietThreshold.value, 10);
+    const dbToY = db => {
+      const c = Math.max(MIN_DB, Math.min(0, db));
+      return h - ((c - MIN_DB) / (0 - MIN_DB)) * h;
+    };
+    // grid
+    tCtx.strokeStyle = '#1a2028'; tCtx.lineWidth = 1;
+    for (let db = -50; db <= 0; db += 10) {
+      const y = dbToY(db);
+      tCtx.beginPath(); tCtx.moveTo(0, y); tCtx.lineTo(w, y); tCtx.stroke();
+      tCtx.fillStyle = '#3a4451'; tCtx.font = '10px monospace';
+      tCtx.fillText(`${db}`, 4, y - 2);
+    }
+    // threshold lines
+    tCtx.strokeStyle = 'rgba(255,255,255,0.4)'; tCtx.setLineDash([4,4]); tCtx.lineWidth = 1;
+    tCtx.beginPath(); tCtx.moveTo(0, dbToY(threshold)); tCtx.lineTo(w, dbToY(threshold)); tCtx.stroke();
+    if (els.quietEnabled.checked) {
+      tCtx.strokeStyle = 'rgba(88,166,255,0.5)';
+      tCtx.beginPath(); tCtx.moveTo(0, dbToY(quietT)); tCtx.lineTo(w, dbToY(quietT)); tCtx.stroke();
+    }
+    tCtx.setLineDash([]);
+    // samples as line + fill
+    if (timelineBuf.length > 1) {
+      const tx = ts => w - ((now - ts) / windowMs) * w;
+      tCtx.beginPath();
+      tCtx.moveTo(tx(timelineBuf[0].ts), h);
+      for (const p of timelineBuf) tCtx.lineTo(tx(p.ts), dbToY(p.db));
+      tCtx.lineTo(tx(timelineBuf[timelineBuf.length-1].ts), h);
+      tCtx.closePath();
+      const grad = tCtx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, 'rgba(248,81,73,0.45)');
+      grad.addColorStop(0.5, 'rgba(210,153,34,0.30)');
+      grad.addColorStop(1, 'rgba(63,185,80,0.15)');
+      tCtx.fillStyle = grad; tCtx.fill();
+      tCtx.strokeStyle = '#58a6ff'; tCtx.lineWidth = 1.5;
+      tCtx.beginPath();
+      for (let i = 0; i < timelineBuf.length; i++) {
+        const p = timelineBuf[i];
+        if (i === 0) tCtx.moveTo(tx(p.ts), dbToY(p.db));
+        else tCtx.lineTo(tx(p.ts), dbToY(p.db));
+      }
+      tCtx.stroke();
+    }
+    // warning markers
+    for (const w0 of timelineWarnings) {
+      const x = w - ((now - w0.ts) / windowMs) * w;
+      tCtx.fillStyle = '#f85149';
+      tCtx.beginPath(); tCtx.arc(x, dbToY(w0.db), 4, 0, Math.PI * 2); tCtx.fill();
+    }
+  }
+
+  // ===== Histogram =====
+  const hCtx = els.histogram.getContext('2d');
+  async function drawHistogram() {
+    const w = els.histogram.width, h = els.histogram.height;
+    hCtx.fillStyle = '#0d1117'; hCtx.fillRect(0,0,w,h);
+    const start = startOfDay();
+    const end = start + 24 * 3600 * 1000;
+    let events = [];
+    try { events = await queryEvents(start, end); } catch {}
+    const buckets = new Array(24).fill(0);
+    for (const e of events) {
+      if (e.type === 'quiet') continue;
+      const hr = new Date(e.ts).getHours();
+      buckets[hr]++;
+    }
+    const max = Math.max(1, ...buckets);
+    const colW = w / 24;
+    for (let i = 0; i < 24; i++) {
+      const bh = (buckets[i] / max) * (h - 26);
+      const x = i * colW + 2;
+      const y = h - 20 - bh;
+      hCtx.fillStyle = buckets[i] > 0 ? '#f85149' : '#1a2028';
+      hCtx.fillRect(x, y, colW - 4, bh);
+      hCtx.fillStyle = '#3a4451'; hCtx.font = '10px monospace';
+      hCtx.textAlign = 'center';
+      if (i % 3 === 0) hCtx.fillText(`${i}`, x + (colW-4)/2, h - 6);
+      if (buckets[i] > 0) { hCtx.fillStyle = '#e6edf3'; hCtx.fillText(`${buckets[i]}`, x + (colW-4)/2, y - 3); }
+    }
+  }
+
+  // ===== History summary =====
+  let historyRefreshTimer = null;
+  function scheduleHistoryRefresh() {
+    if (historyRefreshTimer) return;
+    historyRefreshTimer = setTimeout(() => { historyRefreshTimer = null; refreshHistory(); }, 500);
+  }
+  async function refreshHistory() {
+    const start = startOfDay();
+    const ydayStart = start - 24*3600*1000;
+    const weekStart = start - 6 * 24 * 3600 * 1000;
+    try {
+      const [today, yday, week] = await Promise.all([
+        queryEvents(start, start + 24*3600*1000),
+        queryEvents(ydayStart, start),
+        queryEvents(weekStart, start + 24*3600*1000),
+      ]);
+      els.todayCount.textContent = today.filter(e => e.type !== 'quiet').length;
+      els.yesterdayCount.textContent = yday.filter(e => e.type !== 'quiet').length;
+      els.weekCount.textContent = week.filter(e => e.type !== 'quiet').length;
+    } catch (e) { console.warn(e); }
+    drawHistogram();
+  }
+
+  // ===== Streak =====
+  function loadStreak() {
+    try { return JSON.parse(localStorage.getItem(STREAK_KEY) || '{}'); }
+    catch { return {}; }
+  }
+  function saveStreak(s) { try { localStorage.setItem(STREAK_KEY, JSON.stringify(s)); } catch {} }
+  let streakRefreshTimer = null;
+  function scheduleStreakRefresh() {
+    if (streakRefreshTimer) return;
+    streakRefreshTimer = setTimeout(() => { streakRefreshTimer = null; refreshStreak(); }, 600);
+  }
+  async function refreshStreak() {
+    const s = loadStreak();
+    const goal = parseInt(els.dailyGoal.value, 10) || 10;
+    const today = todayKey();
+    let lastEval = s.lastEvalDate || today;
+    let streak = s.currentStreak || 0;
+    // Evaluate all complete days between lastEval and today (exclusive of today)
+    const cursor = new Date(lastEval); cursor.setHours(0,0,0,0);
+    const todayD = new Date(); todayD.setHours(0,0,0,0);
+    while (cursor.getTime() < todayD.getTime()) {
+      const dayStart = cursor.getTime();
+      const dayEnd = dayStart + 24*3600*1000;
+      let events = [];
+      try { events = await queryEvents(dayStart, dayEnd); } catch {}
+      const count = events.filter(e => e.type !== 'quiet').length;
+      if (count < goal) streak += 1; else streak = 0;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    s.lastEvalDate = today; s.currentStreak = streak;
+    saveStreak(s);
+    els.statStreak.textContent = streak;
+  }
+
+  // ===== Main loop =====
+  function loop() {
+    if (!running) return;
+    if (paused) return;
+
+    const timeBuf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(timeBuf);
+
+    let sumSq = 0;
+    for (let i = 0; i < timeBuf.length; i++) sumSq += timeBuf[i] * timeBuf[i];
+    const rms = Math.sqrt(sumSq / timeBuf.length);
+    const db = rms > 0 ? 20 * Math.log10(rms) : MIN_DB;
+    const dbShown = Math.max(MIN_DB, db);
+
+    els.levelCurrent.textContent = dbShown.toFixed(1);
+    els.meterFill.style.width = `${dbToPct(dbShown)}%`;
+    updateTitleAndFavicon(dbShown, parseInt(els.threshold.value, 10));
+
+    if (dbShown > peakDb) { peakDb = dbShown; els.statPeak.textContent = `${peakDb.toFixed(1)}`; }
+    avgSum += dbShown; avgN++;
+    if (avgN % 10 === 0) els.statAvg.textContent = `${(avgSum / avgN).toFixed(1)}`;
+
+    timelineBuf.push({ ts: performance.now(), db: dbShown });
+
+    const threshold = parseInt(els.threshold.value, 10);
+    const quietT = parseInt(els.quietThreshold.value, 10);
+    const holdMs = parseInt(els.holdMs.value, 10);
+    const cooldownMs = parseInt(els.cooldown.value, 10);
+    const quietHoldMs = parseInt(els.quietHoldMs.value, 10);
+    const now = performance.now();
+
+    // Loud
+    if (dbShown > threshold) {
+      els.levelCurrent.classList.add('over'); els.levelCurrent.classList.remove('under');
+      if (overSince === null) overSince = now;
+      if (now - overSince >= holdMs && now - lastWarnAt >= cooldownMs) {
+        triggerWarning(dbShown);
+        lastWarnAt = now; overSince = null;
+      }
+      els.status.textContent = '⚠️ 過大';
+      els.status.classList.add('over'); els.status.classList.remove('recording','under','paused');
+    } else {
+      els.levelCurrent.classList.remove('over');
+      overSince = null;
+      els.status.classList.remove('over');
+    }
+
+    // Quiet (only when there's some sound, to avoid firing on pure silence)
+    if (els.quietEnabled.checked && dbShown > QUIET_NOISE_FLOOR && dbShown < quietT) {
+      els.levelCurrent.classList.add('under');
+      if (quietSince === null) quietSince = now;
+      if (now - quietSince >= quietHoldMs && now - lastQuietAt >= 5000) {
+        triggerQuietWarning(dbShown);
+        lastQuietAt = now; quietSince = null;
+      }
+      els.status.textContent = '🔉 過小';
+      els.status.classList.add('under'); els.status.classList.remove('recording','over','paused');
+    } else {
+      els.levelCurrent.classList.remove('under');
+      quietSince = null;
+    }
+
+    if (!els.levelCurrent.classList.contains('over') && !els.levelCurrent.classList.contains('under')) {
+      els.status.textContent = '監測中';
+      els.status.classList.add('recording'); els.status.classList.remove('over','under','paused');
+    }
+
+    // refresh escalation badges (decay)
+    updateLevelBadges(Math.min(ESCALATE_LEVELS, recentWarningTs.filter(t => now - t < parseInt(els.escalateWindow.value,10)*1000).length));
+  }
+
+  // Visual draw loop — only runs when tab is visible (no point drawing if hidden)
+  function drawLoop() {
+    if (!running) return;
+    if (!document.hidden) drawTimeline();
+    drawRafId = requestAnimationFrame(drawLoop);
+  }
+
+  // ===== Start / Stop / Pause =====
+  async function start() {
+    clearError();
+    try {
+      const deviceId = els.deviceSelect.value;
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+        }, video: false,
+      });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.2;
+      sourceNode.connect(analyser);
+      // Silent passthrough to destination → tab is considered "playing audio",
+      // browser keeps the timer at full speed even when tab is in background.
+      keepAliveGain = audioCtx.createGain();
+      keepAliveGain.gain.value = 0.0001;
+      sourceNode.connect(keepAliveGain).connect(audioCtx.destination);
+
+      running = true; paused = false;
+      overSince = null; quietSince = null;
+      lastWarnAt = 0; lastQuietAt = 0;
+      warningCount = 0; peakDb = -Infinity; avgSum = 0; avgN = 0;
+      recentWarningTs = []; timelineBuf = []; timelineWarnings = [];
+      els.statWarnings.textContent = '0'; els.statPeak.textContent = '—'; els.statAvg.textContent = '—';
+      updateLevelBadges(0);
+
+      els.startBtn.textContent = '■ 停止'; els.startBtn.classList.add('stop');
+      els.pauseBtn.disabled = false; els.calibrateBtn.disabled = false;
+      els.recordBtn.disabled = false;
+      els.status.textContent = '監測中'; els.status.classList.add('recording');
+
+      await listDevices();
+      if (els.notifyEnabled.checked) ensureNotificationPermission();
+      acquireWakeLock();
+      // 50ms tick → 20Hz analysis. Even if browser throttles to 1Hz in
+      // background, the keep-alive audio above usually prevents that.
+      loopTimerId = setInterval(loop, 50);
+      drawLoop();
+      refreshHistory();
+      refreshStreak();
+    } catch (e) {
+      console.error(e);
+      if (e.name === 'NotAllowedError') showError('需要麥克風權限。');
+      else if (e.name === 'NotFoundError') showError('找不到麥克風。');
+      else showError(`無法啟動：${e.message}`);
+    }
+  }
+  function stop() {
+    running = false; paused = false;
+    if (loopTimerId) { clearInterval(loopTimerId); loopTimerId = null; }
+    if (drawRafId) { cancelAnimationFrame(drawRafId); drawRafId = null; }
+    if (sourceNode) try { sourceNode.disconnect(); } catch {}
+    if (analyser) try { analyser.disconnect(); } catch {}
+    if (keepAliveGain) try { keepAliveGain.disconnect(); } catch {}
+    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
+    mediaStream = null; audioCtx = null; analyser = null; sourceNode = null; keepAliveGain = null;
+    if (recordingActive) stopRecording();
+    releaseWakeLock();
+    els.startBtn.textContent = '▶ 開始監測'; els.startBtn.classList.remove('stop');
+    els.pauseBtn.disabled = true; els.pauseBtn.textContent = '⏸ 暫停';
+    els.calibrateBtn.disabled = true;
+    els.recordBtn.disabled = true;
+    els.status.textContent = '已停止'; els.status.classList.remove('recording','over','under','paused');
+    els.levelCurrent.textContent = '—';
+    els.levelCurrent.classList.remove('over','under');
+    els.meterFill.style.width = '0%';
+    resetTitleAndFavicon();
+  }
+  function togglePause() {
+    if (!running) return;
+    paused = !paused;
+    els.pauseBtn.textContent = paused ? '▶ 恢復' : '⏸ 暫停';
+    if (paused) { els.status.textContent = '已暫停'; els.status.classList.add('paused'); els.status.classList.remove('recording'); }
+    else { els.status.textContent = '監測中'; els.status.classList.add('recording'); els.status.classList.remove('paused'); }
+  }
+
+  // ===== Calibrate =====
+  async function calibrate() {
+    if (!running) return;
+    els.calibrateBtn.disabled = true;
+    const origText = els.calibrateBtn.textContent;
+    els.calibrateBtn.textContent = '校正中... 安靜 3 秒';
+    const samples = []; const startT = performance.now();
+    await new Promise(resolve => {
+      const tick = () => {
+        if (!running) return resolve();
+        const buf = new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(buf);
+        let sumSq = 0;
+        for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
+        const rms = Math.sqrt(sumSq / buf.length);
+        const dB = rms > 0 ? 20 * Math.log10(rms) : MIN_DB;
+        samples.push(Math.max(MIN_DB, dB));
+        if (performance.now() - startT >= 3000) resolve();
+        else requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    if (samples.length) {
+      const avg = samples.reduce((a,b)=>a+b,0)/samples.length;
+      const max = Math.max(...samples);
+      const suggested = Math.min(0, Math.max(MIN_DB, Math.round(max + 15)));
+      els.threshold.value = suggested;
+      els.threshold.dispatchEvent(new Event('input'));
+      els.calibrateBtn.textContent = `校正完成 (${avg.toFixed(1)} → ${suggested} dB)`;
+      setTimeout(() => { els.calibrateBtn.textContent = origText; }, 4000);
+    }
+    els.calibrateBtn.disabled = false;
+  }
+
+  // ===== Schedule =====
+  function isWithinSchedule(now = new Date()) {
+    if (!els.scheduleEnabled.checked) return null;
+    if (els.weekdaysOnly.checked) {
+      const d = now.getDay();
+      if (d === 0 || d === 6) return false;
+    }
+    const [sh, sm] = els.scheduleStart.value.split(':').map(Number);
+    const [eh, em] = els.scheduleEnd.value.split(':').map(Number);
+    const minutes = now.getHours()*60 + now.getMinutes();
+    const startMin = sh*60 + sm, endMin = eh*60 + em;
+    if (startMin <= endMin) return minutes >= startMin && minutes < endMin;
+    return minutes >= startMin || minutes < endMin;
+  }
+  function checkSchedule() {
+    const within = isWithinSchedule();
+    if (within === null) return;
+    if (within && !running) start();
+    else if (!within && running) stop();
+  }
+  setInterval(checkSchedule, 30000);
+
+  // ===== CSV export =====
+  async function exportCsv() {
+    try {
+      const all = await queryEvents(0, Date.now() + 1);
+      const rows = ['timestamp_iso,unix_ms,type,level,db'];
+      for (const e of all) {
+        rows.push([
+          new Date(e.ts).toISOString(),
+          e.ts,
+          e.type || 'loud',
+          e.level || 1,
+          (e.db != null ? e.db.toFixed(2) : '')
+        ].join(','));
+      }
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `voice-monitor-${todayKey()}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) { showError(`匯出失敗：${e.message}`); }
+  }
+  async function clearLog() {
+    if (!confirm('確定要清除全部紀錄？此操作無法復原。')) return;
+    await clearAllEvents();
+    refreshHistory();
+    refreshStreak();
+  }
+
+  // ===== Wake Lock (keep screen awake while monitoring) =====
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    if (wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (e) { console.warn('wakeLock failed:', e); }
+  }
+  function releaseWakeLock() {
+    if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && running && !wakeLock) acquireWakeLock();
+  });
+
+  // ===== Recording (MediaRecorder → decode → MP3 via lamejs) =====
+  let mediaRecorder = null;
+  let recordChunks = [];
+  let recordMime = '';
+  let recordStartTs = 0;
+  let recordTimer = null;
+  let recordingActive = false;
+
+  function updateRecordStatus() {
+    if (!recordingActive) return;
+    const secs = Math.floor((performance.now() - recordStartTs) / 1000);
+    const mm = String(Math.floor(secs/60)).padStart(2,'0');
+    const ss = String(secs%60).padStart(2,'0');
+    const kbps = parseInt(els.recordBitrate.value, 10);
+    const estMB = (kbps * secs / 8 / 1024).toFixed(2);
+    els.recordStatus.innerHTML = `<span style="color:var(--red)">● 錄音中</span> ${mm}:${ss} · ~${estMB} MB`;
+  }
+
+  function floatToInt16(input) {
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return out;
+  }
+
+  function pickRecordMime() {
+    const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+    for (const t of types) if (window.MediaRecorder?.isTypeSupported?.(t)) return t;
+    return '';
+  }
+
+  async function encodeBlobToMp3(blob, kbps) {
+    const arrayBuf = await blob.arrayBuffer();
+    const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let audioBuf;
+    try { audioBuf = await tempCtx.decodeAudioData(arrayBuf); }
+    finally { try { tempCtx.close(); } catch {} }
+    const length = audioBuf.length;
+    const sr = audioBuf.sampleRate;
+    const channels = audioBuf.numberOfChannels;
+    // Downmix to mono
+    const mono = new Float32Array(length);
+    if (channels === 1) {
+      mono.set(audioBuf.getChannelData(0));
+    } else {
+      const l = audioBuf.getChannelData(0), r = audioBuf.getChannelData(1);
+      for (let i = 0; i < length; i++) mono[i] = (l[i] + r[i]) * 0.5;
+    }
+    const encoder = new lamejs.Mp3Encoder(1, sr, kbps);
+    const block = 1152;
+    const out = [];
+    for (let i = 0; i < length; i += block) {
+      const chunk = mono.subarray(i, Math.min(i + block, length));
+      const ints = floatToInt16(chunk);
+      const enc = encoder.encodeBuffer(ints);
+      if (enc.length > 0) out.push(enc);
+    }
+    const tail = encoder.flush();
+    if (tail.length > 0) out.push(tail);
+    return new Blob(out, { type: 'audio/mpeg' });
+  }
+
+  function startRecording() {
+    if (!running || !mediaStream) { showError('請先開始監測再錄音。'); return; }
+    if (recordingActive) return;
+    if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
+      showError('MP3 編碼器未載入。');
+      return;
+    }
+    try {
+      recordMime = pickRecordMime();
+      const opts = recordMime ? { mimeType: recordMime } : {};
+      mediaRecorder = new MediaRecorder(mediaStream, opts);
+      recordChunks = [];
+      mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) recordChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        els.recordStatus.textContent = '🛠 處理 MP3 中...';
+        try {
+          const captureBlob = new Blob(recordChunks, { type: recordMime || 'audio/webm' });
+          if (captureBlob.size === 0) throw new Error('錄到 0 byte');
+          const kbps = parseInt(els.recordBitrate.value, 10);
+          const mp3Blob = await encodeBlobToMp3(captureBlob, kbps);
+          const sizeMB = (mp3Blob.size / 1024 / 1024).toFixed(2);
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(mp3Blob);
+          const d = new Date();
+          const stamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`;
+          a.download = `voice-${stamp}.mp3`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          els.recordStatus.textContent = `已儲存 ${sizeMB} MB`;
+        } catch (err) {
+          console.error('encode error', err);
+          showError(`轉 MP3 失敗：${err.message}。已用原始 webm 下載保底。`);
+          const fallback = new Blob(recordChunks, { type: recordMime || 'audio/webm' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(fallback);
+          const ext = (recordMime || 'audio/webm').includes('mp4') ? 'm4a'
+                    : (recordMime || 'audio/webm').includes('ogg') ? 'ogg' : 'webm';
+          a.download = `voice-fallback.${ext}`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          els.recordStatus.textContent = '已下載 webm 保底';
+        } finally {
+          setTimeout(() => { if (!recordingActive) els.recordStatus.textContent = '未錄音'; }, 5000);
+        }
+      };
+      mediaRecorder.start(1000);
+      recordingActive = true;
+      recordStartTs = performance.now();
+      els.recordBtn.textContent = '■ 停止錄音';
+      els.recordBtn.style.background = 'var(--red)';
+      els.recordBtn.style.color = 'white';
+      els.recordBtn.style.border = 'none';
+      els.recordBitrate.disabled = true;
+      recordTimer = setInterval(updateRecordStatus, 500);
+      updateRecordStatus();
+    } catch (e) {
+      console.error(e);
+      showError(`錄音啟動失敗：${e.message}`);
+    }
+  }
+
+  function stopRecording() {
+    if (!recordingActive) return;
+    recordingActive = false;
+    if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+    try { mediaRecorder?.stop(); } catch (e) { console.warn(e); }
+    els.recordBtn.textContent = '● 開始錄音 (MP3)';
+    els.recordBtn.style.background = '';
+    els.recordBtn.style.color = '';
+    els.recordBtn.style.border = '';
+    els.recordBitrate.disabled = false;
+  }
+
+  function toggleRecording() {
+    if (recordingActive) stopRecording();
+    else startRecording();
+  }
+
+  els.recordBtn.addEventListener('click', toggleRecording);
+
+  // ===== Hotkey =====
+  window.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.shiftKey && e.code === 'KeyM') {
+      e.preventDefault();
+      if (!running) start();
+      else togglePause();
+    }
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyR') {
+      e.preventDefault();
+      if (!recordingActive) startRecording();
+    }
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyK') {
+      e.preventDefault();
+      if (recordingActive) stopRecording();
+    }
+  });
+
+  // ===== PWA install =====
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); deferredPrompt = e;
+    els.installBtn.hidden = false;
+  });
+  els.installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    els.installBtn.hidden = true;
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW reg failed', e));
+  }
+
+  // ===== Custom file / preview =====
+  els.soundSelect.addEventListener('change', () => {
+    els.customFileRow.style.display = els.soundSelect.value === 'custom' ? 'flex' : 'none';
+  });
+  if (els.soundSelect.value === 'custom') els.customFileRow.style.display = 'flex';
+  els.customFile.addEventListener('change', () => {
+    const f = els.customFile.files?.[0]; if (!f) return;
+    if (customFileUrl) URL.revokeObjectURL(customFileUrl);
+    customFileUrl = URL.createObjectURL(f);
+    if (warningAudioEl) warningAudioEl.src = customFileUrl;
+  });
+  els.previewSound.addEventListener('click', () => playWarningSound());
+
+  // ===== Buttons =====
+  els.startBtn.addEventListener('click', () => { if (running) stop(); else start(); });
+  els.pauseBtn.addEventListener('click', togglePause);
+  els.calibrateBtn.addEventListener('click', calibrate);
+  els.refreshHistory.addEventListener('click', refreshHistory);
+  els.exportCsv.addEventListener('click', exportCsv);
+  els.clearLog.addEventListener('click', clearLog);
+  els.dailyGoal.addEventListener('change', refreshStreak);
+
+  // ===== Init =====
+  navigator.mediaDevices.addEventListener?.('devicechange', listDevices);
+  listDevices();
+  refreshHistory();
+  refreshStreak();
+  checkSchedule();
+})();
+</script>
+</body>
+</html>
