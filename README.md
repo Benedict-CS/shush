@@ -46,13 +46,13 @@ Then point a reverse proxy (nginx / Caddy / Traefik) at the container and put it
 
 ## Deploying behind your own domain
 
-The full chain looks like:
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step. TL;DR:
 
 ```
 phone / laptop  →  Cloudflare (HTTPS)  →  your nginx  →  shush container
 ```
 
-Cloudflare gives free HTTPS, your nginx forwards `voice.example.com` to the container. Once HTTPS is in place, microphones, notifications, and "Install as App" all work on both desktop and mobile.
+`./deploy.sh -h user@server -p /opt/shush` rsyncs the project to a remote box, then `ssh`s in and runs `start.sh restart` to rebuild + restart the container.
 
 ## How the audio pipeline works
 

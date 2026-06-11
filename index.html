@@ -251,6 +251,7 @@
     <button id="installBtn" class="install-btn" hidden>📲 安裝為桌面 App</button>
 
     <div class="error" id="error"></div>
+    <div id="micDiagBanner" style="display:none; background:#3d2a0f; border:1px solid var(--yellow); color:var(--yellow); padding:12px; border-radius:8px; margin-bottom:12px; font-size:13px;"></div>
     <div class="warning-banner" id="warning">⚠️ 太大聲了！小聲一點</div>
 
     <!-- Live monitor -->
@@ -460,7 +461,38 @@
           </div>
         </div>
 
+        <div class="settings-section">
+          <div class="settings-section-title" data-section>聲紋識別（只警告你的聲音）</div>
+          <div class="settings-section-body">
+            <div class="setting-row">
+              <label class="check"><input type="checkbox" id="fpEnabled"> 啟用聲紋過濾（旁人講話不算）</label>
+            </div>
+            <div class="setting-row">
+              <button id="fpRecordBtn" class="ghost" style="flex:1;">🎙️ 錄製聲紋基準（5 秒，正常音量說話）</button>
+            </div>
+            <div class="setting-row">
+              <label for="fpThreshold">相似度門檻</label>
+              <input type="range" id="fpThreshold" min="0" max="100" value="40" step="5">
+              <span class="value" id="fpThresholdVal">40%</span>
+            </div>
+            <div id="fpStatus" class="hint">尚未錄製基準</div>
+            <div class="hint">啟用後：超標時若聲音跟你的基準相似度低，視為「不是你」，不觸發警告</div>
+          </div>
+        </div>
+
       </div>
+    </div>
+
+    <!-- Trend (7/30 day) -->
+    <div class="panel">
+      <div class="panel-title">趨勢
+        <span style="display:inline-flex; gap:6px;">
+          <button id="trendRange7" class="tiny">7 天</button>
+          <button id="trendRange30" class="tiny">30 天</button>
+        </span>
+      </div>
+      <div class="hint" style="margin-bottom:6px;" id="trendInfo">最近 7 天每日警告次數（紅虛線 = 每日目標）</div>
+      <canvas class="histogram" id="trend" width="1200" height="200"></canvas>
     </div>
 
     <!-- History -->
@@ -484,8 +516,11 @@
       </div>
       <div class="hint" style="margin-bottom:8px;">今日各小時警告次數</div>
       <canvas class="histogram" id="histogram" width="1200" height="200"></canvas>
-      <div class="history-actions">
+      <div class="history-actions" style="flex-wrap:wrap;">
         <button id="exportCsv" class="ghost">匯出 CSV</button>
+        <button id="exportJson" class="ghost">匯出全部（JSON · 跨裝置）</button>
+        <button id="importJson" class="ghost">匯入 JSON</button>
+        <input type="file" id="importJsonFile" accept="application/json,.json" style="display:none;">
         <button id="clearLog" class="ghost">清除全部紀錄</button>
       </div>
     </div>
@@ -500,7 +535,7 @@
   const PREFS_KEY = 'voiceMonitorPrefs';
   const STREAK_KEY = 'voiceMonitorStreak';
   const DB_NAME = 'voiceMonitor';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   // ===== Element refs =====
   const els = {};
   [
@@ -521,7 +556,11 @@
     'recordBtn','recordStatus','recordBitrate',
     'recordPreviewBox','recordPreviewAudio','recordPreviewRaw','downloadMp3','downloadRaw','recordDiag',
     'testMicBtn','currentMicLabel',
-    'sttEnabled','sttStatus','sttTranscript','sttClear'
+    'sttEnabled','sttStatus','sttTranscript','sttClear',
+    'micDiagBanner',
+    'trend','trendRange7','trendRange30','trendInfo',
+    'fpEnabled','fpRecordBtn','fpThreshold','fpThresholdVal','fpStatus',
+    'exportJson','importJson','importJsonFile'
   ].forEach(id => els[id] = document.getElementById(id));
 
   const favicon = document.getElementById('favicon');
@@ -579,6 +618,7 @@
         scheduleStart: els.scheduleStart.value, scheduleEnd: els.scheduleEnd.value,
         weekdaysOnly: els.weekdaysOnly.checked,
         dailyGoal: els.dailyGoal.value,
+        fpEnabled: els.fpEnabled.checked, fpThreshold: els.fpThreshold.value,
       }));
     } catch {}
   }
@@ -587,10 +627,10 @@
       const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
       const set = (key, prop) => { if (p[key] != null) els[key][prop] = p[key]; };
       ['threshold','holdMs','cooldown',
-       'escalateWindow','soundSelect','soundVolume','scheduleStart','scheduleEnd','dailyGoal']
+       'escalateWindow','soundSelect','soundVolume','scheduleStart','scheduleEnd','dailyGoal','fpThreshold']
         .forEach(k => set(k, 'value'));
       ['escalateEnabled','beepEnabled','notifyEnabled',
-       'titleEnabled','scheduleEnabled','weekdaysOnly']
+       'titleEnabled','scheduleEnabled','weekdaysOnly','fpEnabled']
         .forEach(k => { if (typeof p[k] === 'boolean') els[k].checked = p[k]; });
       // refresh labels
       [els.threshold,els.holdMs,els.cooldown,
@@ -612,6 +652,10 @@
         const db = req.result;
         if (!db.objectStoreNames.contains('events')) {
           const s = db.createObjectStore('events', { keyPath: 'id', autoIncrement: true });
+          s.createIndex('ts', 'ts');
+        }
+        if (!db.objectStoreNames.contains('transcripts')) {
+          const s = db.createObjectStore('transcripts', { keyPath: 'id', autoIncrement: true });
           s.createIndex('ts', 'ts');
         }
       };
@@ -812,7 +856,8 @@
       document.body.classList.remove('warning');
     }, flashMs);
 
-    logEvent({ ts: Date.now(), db: currentDb, level, type: 'loud' });
+    const transcript = getRecentTranscript();
+    logEvent({ ts: Date.now(), db: currentDb, level, type: 'loud', transcript: transcript || undefined });
     scheduleHistoryRefresh();
     scheduleStreakRefresh();
   }
@@ -950,6 +995,7 @@
       els.weekCount.textContent = week.length;
     } catch (e) { console.warn(e); }
     drawHistogram();
+    drawTrend();
   }
 
   // ===== Streak =====
@@ -1019,7 +1065,9 @@
       els.levelCurrent.classList.add('over');
       if (overSince === null) overSince = now;
       if (now - overSince >= holdMs && now - lastWarnAt >= cooldownMs) {
-        triggerWarning(dbShown);
+        if (isUserVoice()) {
+          triggerWarning(dbShown);
+        }
         lastWarnAt = now; overSince = null;
       }
       els.status.textContent = '⚠️ 過大';
@@ -1090,6 +1138,8 @@
       drawLoop();
       refreshHistory();
       refreshStreak();
+      drawTrend();
+      diagnoseMic();
     } catch (e) {
       console.error(e);
       if (e.name === 'NotAllowedError') showError('需要麥克風權限。');
@@ -1115,6 +1165,7 @@
     els.recordBtn.disabled = true;
     els.testMicBtn.disabled = true;
     els.currentMicLabel.textContent = '尚未開始監測';
+    hideMicDiag();
     els.status.textContent = '已停止'; els.status.classList.remove('recording','over','paused');
     els.levelCurrent.textContent = '—';
     els.levelCurrent.classList.remove('over');
@@ -1504,7 +1555,9 @@
         p.style.color = 'var(--text)';
         els.sttTranscript.appendChild(p);
         els.sttTranscript.scrollTop = els.sttTranscript.scrollHeight;
+        logTranscript(final.trim(), true);
       }
+      if (interim) logTranscript(interim.trim(), false);
       els.sttStatus.textContent = interim ? `識別中: ${interim}` : '監聽中...';
     };
     r.onerror = e => {
@@ -1548,6 +1601,309 @@
   els.sttClear.addEventListener('click', () => {
     els.sttTranscript.innerHTML = '<span style="color:var(--muted);">已清空</span>';
   });
+
+  // ===== #3 Bad mic auto-detect =====
+  function showMicDiag(html) {
+    els.micDiagBanner.innerHTML = html;
+    els.micDiagBanner.style.display = 'block';
+  }
+  function hideMicDiag() { els.micDiagBanner.style.display = 'none'; }
+  async function diagnoseMic() {
+    if (!running || !analyser) return;
+    hideMicDiag();
+    const startT = performance.now();
+    const dbs = [], peakBins = [];
+    while (performance.now() - startT < 1500) {
+      const t = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(t);
+      let sumSq = 0;
+      for (let i = 0; i < t.length; i++) sumSq += t[i] * t[i];
+      const rms = Math.sqrt(sumSq / t.length);
+      const db = rms > 0 ? 20 * Math.log10(rms) : -100;
+      dbs.push(db);
+      const f = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(f);
+      let maxIdx = 0, maxVal = -Infinity;
+      for (let i = 4; i < f.length; i++) if (f[i] > maxVal) { maxVal = f[i]; maxIdx = i; }
+      peakBins.push(maxIdx);
+      await new Promise(r => setTimeout(r, 50));
+    }
+    if (!dbs.length) return;
+    const avg = dbs.reduce((a,b)=>a+b,0) / dbs.length;
+    const variance = dbs.reduce((a,b)=>a + (b-avg)*(b-avg), 0) / dbs.length;
+    const stdev = Math.sqrt(variance);
+    const peakHist = {};
+    for (const b of peakBins) peakHist[b] = (peakHist[b] || 0) + 1;
+    const topPeakCount = Math.max(...Object.values(peakHist));
+    const topPeakRatio = topPeakCount / peakBins.length;
+    const micName = mediaStream?.getAudioTracks()[0]?.label || '(未知)';
+    let issue = null;
+    if (avg < -55 && stdev < 3) issue = `音量幾乎為零（平均 ${avg.toFixed(1)} dB）。麥克風可能沒在收音。`;
+    else if (stdev < 0.8 && dbs.length > 10) issue = `音量完全沒有變化（標準差只有 ${stdev.toFixed(2)} dB）。可能是「死的」麥克風裝置。`;
+    else if (topPeakRatio > 0.8 && avg > -50) issue = `偵測到固定頻率雜訊（${(topPeakRatio*100).toFixed(0)}% 時間集中在同一頻段）。可能是 NVIDIA Virtual Audio 之類的非真實麥克風。`;
+    if (issue) {
+      const otherCount = els.deviceSelect.options.length - 1;
+      showMicDiag(
+        `<strong>⚠️ 麥克風可能有問題</strong><br>` +
+        `當前裝置：<strong>${micName}</strong><br>` +
+        `問題：${issue}<br>` +
+        `<span style="opacity:0.8;">建議：在「麥克風」下拉選別的裝置（共 ${otherCount + 1} 個可選），或檢查 OS 端麥克風設定。</span>`
+      );
+    }
+  }
+
+  // ===== #5 Voice fingerprint =====
+  const FP_KEY = 'shushVoiceFingerprint';
+  let fingerprint = null;
+  function loadFingerprint() {
+    try {
+      const raw = localStorage.getItem(FP_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      fingerprint = new Float32Array(obj.data);
+      els.fpStatus.textContent = `✅ 已錄製基準（${obj.frames} 幀, ${new Date(obj.ts).toLocaleString()}）`;
+    } catch {}
+  }
+  function saveFingerprint(arr, frames) {
+    const obj = { data: Array.from(arr), frames, ts: Date.now() };
+    localStorage.setItem(FP_KEY, JSON.stringify(obj));
+    fingerprint = arr;
+  }
+  function cosineSim(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+    if (na === 0 || nb === 0) return 0;
+    return dot / Math.sqrt(na * nb);
+  }
+  function normalizeMag(arr) {
+    let sum = 0;
+    for (let i = 0; i < arr.length; i++) sum += arr[i];
+    if (sum === 0) return new Float32Array(arr.length);
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) out[i] = arr[i] / sum;
+    return out;
+  }
+  function currentSpectrum() {
+    if (!analyser) return null;
+    const f = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(f);
+    const out = new Float32Array(f.length);
+    for (let i = 0; i < f.length; i++) out[i] = Math.pow(10, f[i] / 20);
+    return normalizeMag(out);
+  }
+  async function recordFingerprint() {
+    if (!running || !analyser) { showError('請先開始監測。'); return; }
+    els.fpRecordBtn.disabled = true;
+    const origText = els.fpRecordBtn.textContent;
+    const startT = performance.now();
+    const accum = new Float32Array(analyser.frequencyBinCount);
+    let frames = 0;
+    while (performance.now() - startT < 5000) {
+      const secs = Math.floor((performance.now() - startT) / 1000) + 1;
+      els.fpRecordBtn.textContent = `錄製中... 講話 ${secs}/5`;
+      const spec = currentSpectrum();
+      if (spec) {
+        // Only count frames where volume is above noise floor (real speech)
+        let energy = 0;
+        for (let i = 0; i < spec.length; i++) energy += spec[i];
+        if (energy > 0.001) {
+          for (let i = 0; i < accum.length; i++) accum[i] += spec[i];
+          frames++;
+        }
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (frames < 5) {
+      els.fpStatus.textContent = `❌ 錄製失敗：只取到 ${frames} 幀有效音訊。請正常音量說話再試。`;
+    } else {
+      for (let i = 0; i < accum.length; i++) accum[i] /= frames;
+      const norm = normalizeMag(accum);
+      saveFingerprint(norm, frames);
+      els.fpStatus.textContent = `✅ 已錄製基準（${frames} 幀）`;
+    }
+    els.fpRecordBtn.textContent = origText;
+    els.fpRecordBtn.disabled = false;
+  }
+  function isUserVoice() {
+    if (!els.fpEnabled.checked || !fingerprint) return true; // bypass
+    const cur = currentSpectrum();
+    if (!cur) return true;
+    const sim = cosineSim(cur, fingerprint);
+    const threshold = parseInt(els.fpThreshold.value, 10) / 100;
+    return sim >= threshold;
+  }
+  els.fpThreshold.addEventListener('input', () => { els.fpThresholdVal.textContent = `${els.fpThreshold.value}%`; });
+  els.fpThreshold.dispatchEvent(new Event('input'));
+  els.fpRecordBtn.addEventListener('click', recordFingerprint);
+  loadFingerprint();
+
+  // ===== #4 Weekly / monthly trend chart =====
+  let trendDays = 7;
+  els.trendRange7.addEventListener('click', () => { trendDays = 7; drawTrend(); });
+  els.trendRange30.addEventListener('click', () => { trendDays = 30; drawTrend(); });
+  const trCtx = els.trend.getContext('2d');
+  async function drawTrend() {
+    const w = els.trend.width, h = els.trend.height;
+    trCtx.fillStyle = '#0d1117'; trCtx.fillRect(0,0,w,h);
+    const todayStart = startOfDay();
+    const days = [];
+    for (let i = trendDays - 1; i >= 0; i--) {
+      const start = todayStart - i * 24*3600*1000;
+      const end = start + 24*3600*1000;
+      let count = 0;
+      try {
+        const events = await queryEvents(start, end);
+        count = events.length;
+      } catch {}
+      days.push({ start, count });
+    }
+    const goal = parseInt(els.dailyGoal.value, 10) || 10;
+    const maxCount = Math.max(goal * 1.2, ...days.map(d => d.count));
+    const colW = w / days.length;
+    // bars
+    for (let i = 0; i < days.length; i++) {
+      const d = days[i];
+      const bh = (d.count / maxCount) * (h - 28);
+      const x = i * colW + 2;
+      const y = h - 22 - bh;
+      const overGoal = d.count >= goal;
+      trCtx.fillStyle = overGoal ? '#f85149' : (d.count > 0 ? '#3fb950' : '#1a2028');
+      trCtx.fillRect(x, y, colW - 4, bh);
+      // date label
+      const dt = new Date(d.start);
+      trCtx.fillStyle = '#3a4451'; trCtx.font = '10px monospace';
+      trCtx.textAlign = 'center';
+      const step = trendDays <= 7 ? 1 : 5;
+      if (i % step === 0 || i === days.length - 1) {
+        trCtx.fillText(`${dt.getMonth()+1}/${dt.getDate()}`, x + (colW-4)/2, h - 6);
+      }
+      if (d.count > 0) {
+        trCtx.fillStyle = '#e6edf3';
+        trCtx.fillText(`${d.count}`, x + (colW-4)/2, y - 3);
+      }
+    }
+    // goal line
+    const goalY = h - 22 - (goal / maxCount) * (h - 28);
+    trCtx.strokeStyle = 'rgba(248,81,73,0.6)';
+    trCtx.setLineDash([4,4]); trCtx.lineWidth = 1;
+    trCtx.beginPath(); trCtx.moveTo(0, goalY); trCtx.lineTo(w, goalY); trCtx.stroke();
+    trCtx.setLineDash([]);
+    trCtx.fillStyle = '#f85149'; trCtx.font = '10px monospace';
+    trCtx.textAlign = 'left';
+    trCtx.fillText(`目標 ${goal}/日`, 4, goalY - 3);
+
+    els.trendInfo.textContent = `最近 ${trendDays} 天每日警告次數 · 達標(綠) ${days.filter(d=>d.count<goal).length}/${trendDays}`;
+  }
+
+  // ===== #6 STT → IndexedDB =====
+  const STT_BUFFER_SECONDS = 10;
+  let sttRingBuffer = [];
+  async function logTranscript(text, isFinal) {
+    if (!text || !text.trim()) return;
+    sttRingBuffer.push({ ts: Date.now(), text: text.trim(), isFinal });
+    const cutoff = Date.now() - STT_BUFFER_SECONDS * 1000 - 5000;
+    sttRingBuffer = sttRingBuffer.filter(t => t.ts >= cutoff);
+    if (isFinal) {
+      try {
+        const db = await getDb();
+        await new Promise((res, rej) => {
+          const tx = db.transaction('transcripts', 'readwrite');
+          tx.objectStore('transcripts').add({ ts: Date.now(), text: text.trim() });
+          tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+        });
+      } catch (e) { console.warn('logTranscript failed:', e); }
+    }
+  }
+  function getRecentTranscript() {
+    const cutoff = Date.now() - STT_BUFFER_SECONDS * 1000;
+    return sttRingBuffer.filter(t => t.ts >= cutoff).map(t => t.text).join(' ');
+  }
+
+  // ===== #10 Export / Import JSON =====
+  async function exportAll() {
+    try {
+      const events = await queryEvents(0, Date.now() + 1);
+      let transcripts = [];
+      try {
+        const db = await getDb();
+        transcripts = await new Promise((res, rej) => {
+          const out = [];
+          const tx = db.transaction('transcripts');
+          tx.objectStore('transcripts').openCursor().onsuccess = e => {
+            const c = e.target.result;
+            if (c) { out.push(c.value); c.continue(); } else res(out);
+          };
+          tx.onerror = () => rej(tx.error);
+        });
+      } catch {}
+      const payload = {
+        schemaVersion: 1, exportedAt: new Date().toISOString(),
+        prefs: JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'),
+        streak: JSON.parse(localStorage.getItem(STREAK_KEY) || '{}'),
+        fingerprint: JSON.parse(localStorage.getItem(FP_KEY) || 'null'),
+        events, transcripts,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `shush-backup-${todayKey()}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (e) { showError(`匯出失敗：${e.message}`); }
+  }
+  async function importAll(file) {
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      if (!payload || payload.schemaVersion !== 1) throw new Error('檔案格式錯誤或版本不符');
+      if (!confirm('匯入會覆蓋目前所有設定 + 紀錄 + 連勝 + 聲紋。確定要繼續？')) return;
+      // Prefs
+      if (payload.prefs) localStorage.setItem(PREFS_KEY, JSON.stringify(payload.prefs));
+      if (payload.streak) localStorage.setItem(STREAK_KEY, JSON.stringify(payload.streak));
+      if (payload.fingerprint) localStorage.setItem(FP_KEY, JSON.stringify(payload.fingerprint));
+      // Events
+      const db = await getDb();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(['events','transcripts'], 'readwrite');
+        const evStore = tx.objectStore('events');
+        evStore.clear();
+        for (const e of (payload.events || [])) { delete e.id; evStore.add(e); }
+        const trStore = tx.objectStore('transcripts');
+        trStore.clear();
+        for (const t of (payload.transcripts || [])) { delete t.id; trStore.add(t); }
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      alert('匯入完成。頁面即將重新整理。');
+      location.reload();
+    } catch (e) { showError(`匯入失敗：${e.message}`); }
+  }
+  els.exportJson.addEventListener('click', exportAll);
+  els.importJson.addEventListener('click', () => els.importJsonFile.click());
+  els.importJsonFile.addEventListener('change', () => {
+    const f = els.importJsonFile.files?.[0];
+    if (f) importAll(f);
+    els.importJsonFile.value = '';
+  });
+
+  // ===== #1 PWA install polish =====
+  // Hide install button if already running as PWA
+  const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
+  if (isStandalone) {
+    els.installBtn.hidden = true;
+  } else {
+    // iOS Safari never fires beforeinstallprompt — show button anyway with manual instructions
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      els.installBtn.hidden = false;
+      els.installBtn.textContent = '📲 iOS：點分享 → 加入主畫面';
+      els.installBtn.addEventListener('click', () => {
+        alert('iOS Safari 安裝步驟：\n\n1. 點下方分享按鈕（方框 + 上箭頭）\n2. 往下滑找「加入主畫面」\n3. 點「加入」\n\n之後從主畫面直接開 Shush，等於原生 App。');
+      }, { once: false });
+    }
+  }
+  // When PWA is successfully installed, hide the button
+  window.addEventListener('appinstalled', () => { els.installBtn.hidden = true; });
 
   // ===== Hotkey =====
   window.addEventListener('keydown', e => {
@@ -1610,6 +1966,7 @@
   listDevices();
   refreshHistory();
   refreshStreak();
+  drawTrend();
   checkSchedule();
 })();
 </script>
